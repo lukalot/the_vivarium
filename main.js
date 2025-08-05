@@ -49,8 +49,9 @@ class ASCIITerminal {
         
         // CRT glow effect settings
         this.glowEnabled = true;
-        this.glowIntensity = 1.5; // Optimized for single-pass rendering
-        this.glowColor = 'rgb(0, 255, 64, 1)'; // Bright green glow
+        this.glowOpacity = 0.3; // 0.0 to 1.0 
+        this.glowDistance = 40; // blur radius in pixels (larger = wider glow)
+        this.glowColor = [0, 255, 64]; // RGB values without opacity
         
         this.init();
         this.setupTerminal();
@@ -307,32 +308,25 @@ class ASCIITerminal {
                     // Draw the character at logical center with optional CRT glow effect
                     // Draw all characters except regular spaces (cursor █ should be drawn)
                     if (char !== ' ') {
-                        // Save the context state
-                        charCtx.save();
-                        
-                        if (this.glowEnabled && this.glowIntensity > 0) {
-                            // Single-pass efficient CRT glow - much faster!
-                            const intensity = this.glowIntensity;
+                        if (this.glowEnabled && this.glowOpacity > 0) {
+                            // Single-pass efficient glow: draw once with shadow
+                            const glowColorString = `rgba(${this.glowColor[0]}, ${this.glowColor[1]}, ${this.glowColor[2]}, ${this.glowOpacity})`;
                             
-                            // Draw single large, subtle glow
-                            charCtx.shadowColor = this.glowColor;
-                            charCtx.shadowBlur = Math.max(60, 80 * intensity); // Large, scalable glow
+                            charCtx.shadowColor = glowColorString;
+                            charCtx.shadowBlur = this.glowDistance;
                             charCtx.shadowOffsetX = 0;
                             charCtx.shadowOffsetY = 0;
-                            charCtx.fillStyle = this.glowColor;
-                            charCtx.globalAlpha = Math.min(0.12 * intensity, 0.25); // Very subtle
+                            charCtx.fillStyle = textColor;
+                            charCtx.fillText(char, this.charWidth / 2, this.charHeight / 2);
+                            
+                            // Reset shadow for potential second characters
+                            charCtx.shadowColor = 'transparent';
+                            charCtx.shadowBlur = 0;
+                        } else {
+                            // No glow - just draw the text
+                            charCtx.fillStyle = textColor;
                             charCtx.fillText(char, this.charWidth / 2, this.charHeight / 2);
                         }
-                        
-                        // Reset shadow and draw the main text (no shadow, full opacity)
-                        charCtx.shadowColor = 'transparent';
-                        charCtx.shadowBlur = 0;
-                        charCtx.globalAlpha = 1.0;
-                        charCtx.fillStyle = textColor;
-                        charCtx.fillText(char, this.charWidth / 2, this.charHeight / 2);
-                        
-                        // Restore the context state
-                        charCtx.restore();
                     }
                     
                     // Create new texture for this character
@@ -436,14 +430,15 @@ class ASCIITerminal {
 
     // Refresh all visible characters with current glow settings
     refreshDisplay() {
+        // Clear entire texture cache to force regeneration with new glow settings
+        this.characterTextureCache.clear();
+        
         // Force regeneration of all visible characters
         for (let y = 0; y < this.fullRows; y++) {
             for (let x = 0; x < this.fullCols; x++) {
                 const char = this.buffer[y] && this.buffer[y][x];
                 if (char && char !== ' ') {
-                    // Force regeneration by temporarily clearing this character from cache
-                    this.characterTextureCache.delete(char);
-                    // Update the mesh to use new texture
+                    // Update the mesh to use new texture with current glow settings
                     const mesh = this.characterMeshes[y][x];
                     if (mesh && mesh.visible) {
                         // Trigger texture regeneration
@@ -456,7 +451,7 @@ class ASCIITerminal {
                 }
             }
         }
-        console.log('Display refreshed with new glow settings');
+        console.log(`Display refreshed: glow ${this.glowEnabled ? 'enabled' : 'disabled'}, opacity: ${this.glowOpacity}, distance: ${this.glowDistance}px`);
     }
     
     async handleResize() {
@@ -1258,11 +1253,18 @@ window.testPadding = () => {
     };
     
     // CRT Glow Control Functions
-    window.setGlowIntensity = (intensity) => {
-        terminal.glowIntensity = Math.max(0, Math.min(2.0, intensity));
+    window.setGlowOpacity = (opacity) => {
+        terminal.glowOpacity = Math.max(0, Math.min(1.0, opacity));
         terminal.characterTextureCache.clear(); // Clear cache to regenerate with new glow
         terminal.refreshDisplay();
-        console.log(`Glow intensity set to ${terminal.glowIntensity}`);
+        console.log(`Glow opacity set to ${terminal.glowOpacity}`);
+    };
+    
+    window.setGlowDistance = (distance) => {
+        terminal.glowDistance = Math.max(0, Math.min(100, distance));
+        terminal.characterTextureCache.clear(); // Clear cache to regenerate with new glow
+        terminal.refreshDisplay();
+        console.log(`Glow distance set to ${terminal.glowDistance}px`);
     };
     
     window.toggleGlow = () => {
@@ -1272,24 +1274,34 @@ window.testPadding = () => {
         console.log(`Glow ${terminal.glowEnabled ? 'enabled' : 'disabled'}`);
     };
     
-    window.setGlowColor = (color) => {
-        terminal.glowColor = color;
+    window.setGlowColor = (r, g, b) => {
+        if (Array.isArray(r)) {
+            terminal.glowColor = r.slice(0, 3); // Take first 3 elements
+        } else if (typeof r === 'string') {
+            // Parse RGB string like "rgb(255, 100, 0)"
+            const match = r.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+            if (match) {
+                terminal.glowColor = [parseInt(match[1]), parseInt(match[2]), parseInt(match[3])];
+            }
+        } else {
+            terminal.glowColor = [r, g, b];
+        }
         terminal.characterTextureCache.clear(); // Clear cache to regenerate with new color
         terminal.refreshDisplay();
-        console.log(`Glow color set to ${color}`);
+        console.log(`Glow color set to rgb(${terminal.glowColor.join(', ')})`);
     };
     
     window.glowPresets = () => {
-        console.log('CRT Glow Presets (Optimized Single-Pass):');
-        console.log('setGlowColor("rgb(0, 255, 64)")   - Classic green');
-        console.log('setGlowColor("rgb(255, 100, 0)")  - Amber/orange');
-        console.log('setGlowColor("rgb(0, 150, 255)")  - Blue');
-        console.log('setGlowColor("rgb(255, 0, 255)")  - Magenta');
-        console.log('setGlowIntensity(0.8)             - Subtle glow');
-        console.log('setGlowIntensity(1.5)             - Normal glow (default)');
-        console.log('setGlowIntensity(2.0)             - Strong glow');
+        console.log('CRT Glow Controls:');
+        console.log('setGlowOpacity(0.3)               - Subtle glow');
+        console.log('setGlowOpacity(0.6)               - Strong glow');
+        console.log('setGlowDistance(20)               - Tight glow');
+        console.log('setGlowDistance(60)               - Wide glow');
+        console.log('setGlowColor(0, 255, 64)          - Classic green');
+        console.log('setGlowColor(255, 100, 0)         - Amber/orange');
+        console.log('setGlowColor(0, 150, 255)         - Blue');
+        console.log('setGlowColor(255, 0, 255)         - Magenta');
         console.log('toggleGlow()                      - Enable/disable');
-        console.log('Note: Now 75% faster with single-pass rendering!');
     };
     
     // Cursor control
