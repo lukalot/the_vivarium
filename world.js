@@ -193,7 +193,7 @@ class World {
         }
 
         // PHASE 2: Only after simulation is complete, generate narration
-        return this.narratePlayerExperience(results);
+        return await this.narratePlayerExperience(results, action);
     }
 
     // Get the simulation branch - all objects from player's container up to root
@@ -341,7 +341,7 @@ class World {
     }
 
     // Generate a narrated description of what happened from the player's perspective
-    narratePlayerExperience(results) {
+    async narratePlayerExperience(results, playerAction) {
         const playerObject = this.getObject(this.playerObjectId);
         if (!playerObject) {
             return "\nSomething seems wrong - you can't sense yourself.\n";
@@ -355,99 +355,73 @@ class World {
         // Get the player's siblings (other objects in the same container)
         const siblings = playerParent.containedObjects.filter(obj => obj.id !== this.playerObjectId);
         
-        // Filter results to only include parent and siblings
-        const relevantActions = new Map();
+        // Collect parent action
+        const parentAction = results.get(playerParent.id) || "remains still";
         
-        // Include parent's action
-        if (results.has(playerParent.id)) {
-            relevantActions.set(playerParent.id, results.get(playerParent.id));
-        }
-        
-        // Include siblings' actions
-        siblings.forEach(sibling => {
-            if (results.has(sibling.id)) {
-                relevantActions.set(sibling.id, results.get(sibling.id));
+        // Collect sibling actions
+        const siblingActions = siblings.map(sibling => ({
+            objectName: sibling.name,
+            action: results.get(sibling.id) || "remains still"
+        })).filter(({ action }) => action !== "remains still");
+
+        // Prepare context information for the LLM
+        const contextInfo = {
+            playerName: playerObject.name,
+            playerDescription: playerObject.description,
+            containerName: playerParent.name,
+            containerDescription: playerParent.description
+        };
+
+        // Use LLM to generate the narrative
+        if (window.llmManager && window.llmManager.isAvailable()) {
+            try {
+                return await window.llmManager.generateNarrative(
+                    playerAction, 
+                    parentAction, 
+                    siblingActions, 
+                    contextInfo
+                );
+            } catch (error) {
+                console.warn('LLM narrative generation failed, using fallback:', error);
+                return this.generateFallbackNarration(parentAction, siblingActions);
             }
-        });
-
-        return this.generateNarration(relevantActions, playerParent, siblings);
-    }
-
-    // Generate natural language narration of the visible actions
-    generateNarration(relevantActions, playerParent, siblings) {
-        const events = [];
-        
-        // Collect significant events
-        for (const [objId, action] of relevantActions) {
-            if (action !== "remains still" && action !== "no action" && action.trim() !== "") {
-                const obj = this.getObject(objId);
-                if (obj) {
-                    events.push({ object: obj, action: action });
-                }
-            }
+        } else {
+            return this.generateFallbackNarration(parentAction, siblingActions);
         }
-
-        if (events.length === 0) {
-            return this.generateQuietMoment(playerParent, siblings);
-        }
-
-        return this.composeNarrationFromEvents(events, playerParent);
     }
 
-    // Generate narration when nothing notable happens
-    generateQuietMoment(playerParent, siblings) {
-        const ambientOptions = [
-            `You remain aboard the ${playerParent.name.toLowerCase()}. The silence is profound.`,
-            `Nothing stirs within the ${playerParent.name.toLowerCase()}. Time seems suspended.`,
-            `The ${playerParent.name.toLowerCase()} holds its breath, waiting.`,
-            `A moment of stillness settles over everything nearby.`
-        ];
-        
-        const chosen = ambientOptions[Math.floor(Math.random() * ambientOptions.length)];
-        return `\n${chosen}\n`;
-    }
-
-    // Compose a natural narrative from the events that occurred
-    composeNarrationFromEvents(events, playerParent) {
+    // Generate fallback narration when LLM is not available
+    generateFallbackNarration(parentAction, siblingActions) {
         let narrative = "\n";
         
-        // Group events by object type for better storytelling
-        const containerEvents = events.filter(e => e.object.id === playerParent.id);
-        const siblingEvents = events.filter(e => e.object.id !== playerParent.id);
-
-        // Describe sibling actions first (more immediate)
-        if (siblingEvents.length > 0) {
-            siblingEvents.forEach(event => {
-                narrative += this.describeObjectAction(event.object, event.action);
+        // Describe sibling actions first
+        if (siblingActions && siblingActions.length > 0) {
+            siblingActions.forEach(({ objectName, action }) => {
+                if (action !== "remains still" && action !== "no action") {
+                    narrative += `The ${objectName.toLowerCase()} ${action}. `;
+                }
             });
         }
 
-        // Then describe container reactions (broader context)
-        if (containerEvents.length > 0) {
-            containerEvents.forEach(event => {
-                narrative += this.describeContainerAction(event.object, event.action);
-            });
+        // Then describe container reaction
+        if (parentAction && parentAction !== "remains still") {
+            narrative += `The vessel ${parentAction}. `;
         }
 
-        return narrative + "\n";
-    }
-
-    // Describe an action taken by an object in the player's immediate vicinity
-    describeObjectAction(obj, action) {
-        // Handle different object types differently
-        if (obj.id === 'ship_cat') {
-            return `The cat ${action}. `;
-        } else if (obj.id === 'wheel') {
-            return `The steering wheel ${action}. `;
+        if (narrative.trim() === "") {
+            const ambientOptions = [
+                "The silence is profound.",
+                "Nothing stirs. Time seems suspended.",
+                "A moment of stillness settles over everything.",
+                "Everything remains perfectly quiet."
+            ];
+            const chosen = ambientOptions[Math.floor(Math.random() * ambientOptions.length)];
+            narrative = `\n${chosen}\n`;
         } else {
-            // Generic format for other objects
-            return `${obj.name} ${action}. `;
+            narrative += "\n";
         }
-    }
-
-    // Describe an action taken by the container the player is in
-    describeContainerAction(containerObj, action) {
-        return `The ${containerObj.name.toLowerCase()} ${action}. `;
+        
+        return narrative;
     }
 
     // Legacy method for compatibility (now deprecated)

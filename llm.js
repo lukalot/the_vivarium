@@ -7,6 +7,7 @@ class LLMManager {
         this.baseUrl = 'https://api.anthropic.com/v1/messages';
         this.model = 'claude-3-5-haiku-20241022';
         this.maxTokens = 150; // Keep responses concise for simulation
+        this.narrativeMaxTokens = 250; // Allow more tokens for narrative generation
         this.requestQueue = [];
         this.processing = false;
     }
@@ -72,7 +73,7 @@ Your response:`;
     }
 
     // Make an API call to Claude
-    async callClaude(prompt) {
+    async callClaude(prompt, maxTokens = this.maxTokens) {
         const response = await fetch(this.baseUrl, {
             method: 'POST',
             headers: {
@@ -82,7 +83,7 @@ Your response:`;
             },
             body: JSON.stringify({
                 model: this.model,
-                max_tokens: this.maxTokens,
+                max_tokens: maxTokens,
                 messages: [{
                     role: 'user',
                     content: prompt
@@ -147,6 +148,95 @@ Your response:`;
         }
         
         return "remains still";
+    }
+
+    // Generate a narrative summary from the player's perspective
+    async generateNarrative(playerAction, parentAction, siblingActions, contextInfo) {
+        if (!this.isAvailable()) {
+            return this.fallbackNarrative(playerAction, parentAction, siblingActions);
+        }
+
+        const prompt = this.buildNarrativePrompt(playerAction, parentAction, siblingActions, contextInfo);
+        
+        try {
+            const response = await this.callClaude(prompt, this.narrativeMaxTokens);
+            return this.parseNarrativeResponse(response);
+        } catch (error) {
+            console.warn('LLM narrative generation failed, using fallback:', error.message);
+            return this.fallbackNarrative(playerAction, parentAction, siblingActions);
+        }
+    }
+
+    // Build a prompt for narrative generation
+    buildNarrativePrompt(playerAction, parentAction, siblingActions, contextInfo) {
+        let prompt = `You are a narrator for a text-based game. Write a short, atmospheric description (2-3 sentences) of what happens from the player's perspective.
+
+PLAYER CHARACTER: ${contextInfo.playerName} (${contextInfo.playerDescription})
+LOCATION: ${contextInfo.containerName} (${contextInfo.containerDescription})
+
+WHAT HAPPENED:
+- Player Action: ${playerAction}`;
+
+        if (parentAction && parentAction !== "remains still") {
+            prompt += `\n- ${contextInfo.containerName}: ${parentAction}`;
+        }
+
+        if (siblingActions && siblingActions.length > 0) {
+            siblingActions.forEach(({ objectName, action }) => {
+                if (action !== "remains still" && action !== "no action") {
+                    prompt += `\n- ${objectName}: ${action}`;
+                }
+            });
+        }
+
+        prompt += `\n\nWrite a flowing narrative that captures the atmosphere and describes what the player observes. Focus on sensory details and the immediate environment. Keep it concise but evocative. Write in second person ("You...").
+
+Example style: "You turn the wheel and feel the old wood creak beneath your hands. The cat beside you meows nervously as the boat responds, slowly changing course through the dark water."
+
+Your narrative:`;
+
+        return prompt;
+    }
+
+    // Parse and clean the narrative response
+    parseNarrativeResponse(response) {
+        // Remove quotes and clean up
+        let narrative = response.replace(/["']/g, '').trim();
+        
+        // Ensure it ends with proper punctuation
+        if (narrative && !narrative.endsWith('.') && !narrative.endsWith('!') && !narrative.endsWith('?')) {
+            narrative += '.';
+        }
+
+        // Add line breaks for terminal display
+        return `\n${narrative}\n`;
+    }
+
+    // Fallback narrative when LLM is unavailable
+    fallbackNarrative(playerAction, parentAction, siblingActions) {
+        let narrative = "\n";
+        
+        // Describe sibling actions first
+        if (siblingActions && siblingActions.length > 0) {
+            siblingActions.forEach(({ objectName, action }) => {
+                if (action !== "remains still" && action !== "no action") {
+                    narrative += `The ${objectName.toLowerCase()} ${action}. `;
+                }
+            });
+        }
+
+        // Then describe container reaction
+        if (parentAction && parentAction !== "remains still") {
+            narrative += `The vessel ${parentAction}. `;
+        }
+
+        if (narrative.trim() === "") {
+            narrative = "\nNothing seems to happen.\n";
+        } else {
+            narrative += "\n";
+        }
+        
+        return narrative;
     }
 
     // Batch simulate multiple objects (for future optimization)
