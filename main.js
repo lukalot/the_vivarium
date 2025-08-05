@@ -42,20 +42,24 @@ class ASCIITerminal {
 
     // Rainbow animation properties
     this.rainbowFrame = 0;
-    this.rainbowUpdateInterval = 40; // Update colors every 40 frames
+    this.rainbowUpdateInterval = 40; // Update colors every 25 frames
     this.titleArea = { startY: 0, endY: 0, centerX: 0, centerY: 0 };
     this.isRainbowCharacter = new Map(); // Track which positions should be rainbow
     this.rainbowPalette = [
-      "#ff4444", // Vibrant red
-      "#ff9944", // Vibrant orange
-      "#ffff44", // Vibrant yellow
-      "#44ff44", // Vibrant green
-      "#44ffff", // Vibrant cyan
-      "#4444ff", // Vibrant blue
-      "#9944ff", // Vibrant purple
-      "#ff44ff", // Vibrant magenta
+      "#ff2222", // Bright red
+      "#ff9922", // Bright orange
+      "#ffff22", // Bright yellow
+      "#22ff22", // Bright green
+      "#22ffff", // Bright cyan
+      "#2222ff", // Bright blue
+      "#9922ff", // Bright purple
+      "#ff22ff", // Bright magenta
     ];
     this.ringWidth = 6; // Width of each color ring in characters
+
+    // Spiral settings
+    this.spiralEnabled = true;
+    this.spiralTightness = 0.1; // How much the spiral rotates per unit distance
 
     // Padding around screen edges (in characters)
     this.paddingX = 4; // 4 character width on each side
@@ -296,18 +300,42 @@ class ASCIITerminal {
 
         let colorIndex = null;
         if (isRainbow && char !== " ") {
-          // Calculate radial distance from title center
-          const dx = x - this.titleArea.centerX;
+          // Calculate radial distance from title center (shifted right by 3 chars)
+          const dx = x - (this.titleArea.centerX + 3);
           const dy = y - this.titleArea.centerY;
           const distance = Math.sqrt(dx * dx + dy * dy);
 
-          // Calculate which color ring this character is in
-          const ring = Math.floor(distance / this.ringWidth);
-          // Add animation offset based on frame count
-          const animOffset = Math.floor(
-            this.rainbowFrame / this.rainbowUpdateInterval,
-          );
-          colorIndex = (ring + animOffset) % this.rainbowPalette.length;
+          if (this.spiralEnabled && distance > 0) {
+            // Calculate angle from center (0 to 2π instead of -π to π)
+            let angle = Math.atan2(dy, dx);
+            if (angle < 0) angle += 2 * Math.PI;
+
+            // Apply spiral transformation: add rotation based on distance
+            const spiralOffset = distance * this.spiralTightness;
+
+            // Calculate which color ring this character is in, including spiral rotation
+            const ring = Math.floor(distance / this.ringWidth);
+            // Add animation offset based on frame count
+            const animOffset = Math.floor(
+              this.rainbowFrame / this.rainbowUpdateInterval,
+            );
+
+            // Add angular component to create spiral
+            // Use round instead of floor for more symmetric distribution
+            const angleContribution =
+              Math.round((angle + spiralOffset) / (Math.PI / 4)) % 8;
+            colorIndex =
+              (ring + animOffset + angleContribution) %
+              this.rainbowPalette.length;
+          } else {
+            // Original radial pattern
+            const ring = Math.floor(distance / this.ringWidth);
+            // Add animation offset based on frame count
+            const animOffset = Math.floor(
+              this.rainbowFrame / this.rainbowUpdateInterval,
+            );
+            colorIndex = (ring + animOffset) % this.rainbowPalette.length;
+          }
           textColor = this.rainbowPalette[colorIndex];
         }
 
@@ -1105,6 +1133,21 @@ document.addEventListener("DOMContentLoaded", async () => {
     console.log("- roman.txt");
     console.log("- story.txt");
     console.log('Usage: loadTitle("filename.txt")');
+  };
+
+  // Toggle spiral effect
+  window.toggleSpiral = () => {
+    terminal.spiralEnabled = !terminal.spiralEnabled;
+    // Clear rainbow texture cache to force recreation
+    for (const [key, value] of terminal.characterTextureCache.entries()) {
+      if (key.includes("_rainbow_")) {
+        terminal.characterTextureCache.delete(key);
+      }
+    }
+    console.log(`Spiral effect: ${terminal.spiralEnabled ? "ON" : "OFF"}`);
+    console.log(
+      `Spiral tightness: ${terminal.spiralTightness} (try 0.05 to 0.3)`,
+    );
   };
 
   // Test typing functionality
