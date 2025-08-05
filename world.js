@@ -235,8 +235,18 @@ class World {
         // Process from deepest to shallowest
         const depths = Array.from(depthGroups.keys()).sort((a, b) => b - a);
         
+        if (window.terminal && window.terminal.developerMode) {
+            window.terminal.devLog(`=== Bottom-Up Simulation Started ===`);
+            window.terminal.devLog(`Processing ${depths.length} depth levels: [${depths.join(' → ')}]`);
+        }
+        
         for (const depth of depths) {
             const objectsAtDepth = depthGroups.get(depth);
+            
+            if (window.terminal && window.terminal.developerMode) {
+                const objNames = objectsAtDepth.map(o => o.name).join(', ');
+                window.terminal.devLog(`Depth ${depth}: Simulating [${objNames}]`);
+            }
             
             // Process all objects at this depth in parallel
             const promises = objectsAtDepth.map(async (obj) => {
@@ -250,6 +260,10 @@ class World {
             depthResults.forEach(({ objId, action }) => {
                 results.set(objId, action);
             });
+        }
+        
+        if (window.terminal && window.terminal.developerMode) {
+            window.terminal.devLog(`=== Bottom-Up Simulation Complete ===`);
         }
         
         return results;
@@ -293,21 +307,47 @@ class World {
             return childResult || "no action";
         }).filter(action => action !== "no action");
 
+        // Developer logging: show what children did
+        if (window.terminal && window.terminal.developerMode && childActions.length > 0) {
+            window.terminal.devLog(`${obj.name} sees children actions: [${childActions.join(', ')}]`);
+        }
+
         // Player always takes the exact action they specified
         if (obj.id === this.playerObjectId) {
+            if (window.terminal && window.terminal.developerMode) {
+                window.terminal.devLog(`Player (${obj.name}): "${playerAction}"`);
+            }
             return playerAction;
         }
         
         // Use LLM if available, otherwise fall back to basic reactions
         if (window.llmManager && window.llmManager.isAvailable()) {
             try {
-                return await window.llmManager.simulateObjectReaction(obj, playerAction, childActions);
+                const result = await window.llmManager.simulateObjectReaction(obj, playerAction, childActions);
+                if (window.terminal && window.terminal.developerMode) {
+                    window.terminal.devLog(`${obj.name}: "${result}"`);
+                }
+                return result;
             } catch (error) {
                 console.warn(`LLM simulation failed for ${obj.id}, using fallback:`, error);
-                return this.getBasicReaction(obj, playerAction, childActions);
+                if (window.terminal && window.terminal.developerMode) {
+                    window.terminal.devLog(`LLM failed for ${obj.name}, using fallback`);
+                }
+                const fallbackResult = this.getBasicReaction(obj, playerAction, childActions);
+                if (window.terminal && window.terminal.developerMode) {
+                    window.terminal.devLog(`${obj.name} fallback action: "${fallbackResult}"`);
+                }
+                return fallbackResult;
             }
         } else {
-            return this.getBasicReaction(obj, playerAction, childActions);
+            if (window.terminal && window.terminal.developerMode) {
+                window.terminal.devLog(`LLM not available for ${obj.name}, using fallback`);
+            }
+            const fallbackResult = this.getBasicReaction(obj, playerAction, childActions);
+            if (window.terminal && window.terminal.developerMode) {
+                window.terminal.devLog(`${obj.name} fallback action: "${fallbackResult}"`);
+            }
+            return fallbackResult;
         }
     }
 
@@ -372,21 +412,39 @@ class World {
             containerDescription: playerParent.description
         };
 
+        // Developer logging for narrative generation
+        if (window.terminal && window.terminal.developerMode) {
+            window.terminal.devLog(`Generating narrative for ${playerObject.name}`);
+            window.terminal.devLog(`Parent (${playerParent.name}): "${parentAction}"`);
+            if (siblingActions.length > 0) {
+                siblingActions.forEach(sa => {
+                    window.terminal.devLog(`Sibling (${sa.objectName}): "${sa.action}"`);
+                });
+            }
+        }
+
         // Use LLM to generate the narrative (no fallbacks - show errors)
         if (!window.llmManager) {
             return "\n❌ LLM Manager not loaded. Check console for errors.\n";
         }
 
         try {
-            return await window.llmManager.generateNarrative(
+            const narrative = await window.llmManager.generateNarrative(
                 playerAction, 
                 parentAction, 
                 siblingActions, 
                 contextInfo
             );
+            if (window.terminal && window.terminal.developerMode) {
+                window.terminal.devLog(`Narrative generated successfully`);
+            }
+            return narrative;
         } catch (error) {
             // Show the error to the user instead of falling back silently
             console.error('LLM narrative generation failed:', error);
+            if (window.terminal && window.terminal.developerMode) {
+                window.terminal.devLog(`Narrative generation FAILED: ${error.message}`);
+            }
             return `\n❌ Narrative Error: ${error.message}\n\nTip: Use checkLLM() to verify your setup.\n`;
         }
     }

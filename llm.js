@@ -4,33 +4,41 @@
 class LLMManager {
     constructor() {
         this.apiKey = null;
-        this.baseUrl = 'https://api.anthropic.com/v1/messages';
+        this.proxyUrl = 'http://localhost:3001/api/claude'; // Backend proxy
+        this.healthUrl = 'http://localhost:3001/api/health';
         this.model = 'claude-3-5-haiku-20241022';
         this.maxTokens = 150; // Keep responses concise for simulation
         this.narrativeMaxTokens = 250; // Allow more tokens for narrative generation
         this.requestQueue = [];
         this.processing = false;
+        this.useProxy = true; // Use backend proxy instead of direct API calls
         
-        // Try to auto-load API key from config
-        this.loadConfigApiKey();
+        // Check if proxy server is available
+        this.checkProxyHealth();
     }
 
-    // Try to load API key from config.js
-    loadConfigApiKey() {
+    // Check if the proxy server is running and healthy
+    async checkProxyHealth() {
+        if (!this.useProxy) return;
+        
         try {
-            if (window.VIVARIUM_CONFIG && window.VIVARIUM_CONFIG.ANTHROPIC_API_KEY) {
-                const configKey = window.VIVARIUM_CONFIG.ANTHROPIC_API_KEY;
-                if (configKey && configKey !== "your-api-key-here") {
-                    this.apiKey = configKey;
-                    console.log('API key loaded from config.js');
+            const response = await fetch(this.healthUrl);
+            const health = await response.json();
+            
+            if (health.status === 'ok') {
+                console.log('✅ Proxy server connected');
+                if (health.anthropicConfigured) {
+                    console.log('✅ Anthropic API key configured on server');
+                    this.serverReady = true;
                 } else {
-                    console.log('Config found but API key not set. Update config.js with your Anthropic API key.');
+                    console.warn('⚠️ Proxy server running but Anthropic API key not configured');
+                    this.serverReady = false;
                 }
-            } else {
-                console.log('No config.js found or ANTHROPIC_API_KEY not defined. Use setApiKey() manually.');
             }
         } catch (error) {
-            console.log('Could not load config.js:', error.message);
+            console.warn('❌ Proxy server not reachable. Start with: npm start');
+            console.warn('   Then refresh this page.');
+            this.serverReady = false;
         }
     }
 
@@ -42,7 +50,11 @@ class LLMManager {
 
     // Check if LLM is available
     isAvailable() {
-        return !!this.apiKey;
+        if (this.useProxy) {
+            return this.serverReady === true;
+        } else {
+            return !!this.apiKey;
+        }
     }
 
     // Simulate an object's reaction using Claude
@@ -94,9 +106,40 @@ Your response:`;
         return prompt;
     }
 
-    // Make an API call to Claude
+    // Make an API call to Claude (via proxy server)
     async callClaude(prompt, maxTokens = this.maxTokens) {
-        const response = await fetch(this.baseUrl, {
+        if (this.useProxy) {
+            return this.callClaudeProxy(prompt, maxTokens);
+        } else {
+            return this.callClaudeDirect(prompt, maxTokens);
+        }
+    }
+
+    // Call Claude via backend proxy (recommended)
+    async callClaudeProxy(prompt, maxTokens) {
+        const response = await fetch(this.proxyUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                prompt: prompt,
+                maxTokens: maxTokens
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(`Proxy API call failed: ${response.status} ${response.statusText} - ${errorData.error || 'Unknown error'}`);
+        }
+
+        const data = await response.json();
+        return data.content[0].text.trim();
+    }
+
+    // Call Claude directly (legacy - has CORS issues)
+    async callClaudeDirect(prompt, maxTokens) {
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -115,7 +158,7 @@ Your response:`;
 
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
-            throw new Error(`API call failed: ${response.status} ${response.statusText} - ${errorData.error?.message || 'Unknown error'}`);
+            throw new Error(`Direct API call failed: ${response.status} ${response.statusText} - ${errorData.error?.message || 'Unknown error'}`);
         }
 
         const data = await response.json();
@@ -214,6 +257,8 @@ WHAT HAPPENED:
 
 Example style: "You turn the wheel and feel the old wood creak beneath your hands. The cat beside you meows nervously as the boat responds, slowly changing course through the dark water."
 
+Don't append or surround your response with anything that isn't part of the core narrative text.
+
 Your narrative:`;
 
         return prompt;
@@ -264,10 +309,28 @@ window.setApiKey = (key) => {
 
 // Helper function to check LLM status
 window.checkLLM = () => {
-    const available = window.llmManager.isAvailable();
-    console.log(`LLM Status: ${available ? 'Available' : 'Not configured'}`);
-    if (!available) {
-        console.log('To enable LLM: setApiKey("your-anthropic-api-key")');
+    const manager = window.llmManager;
+    const available = manager.isAvailable();
+    
+    console.log(`🤖 LLM Status: ${available ? '✅ Available' : '❌ Not Available'}`);
+    
+    if (manager.useProxy) {
+        console.log(`📡 Using proxy server at: ${manager.proxyUrl}`);
+        console.log(`🏥 Server ready: ${manager.serverReady ? '✅ Yes' : '❌ No'}`);
+        
+        if (!available) {
+            console.log('');
+            console.log('🛠️ To fix:');
+            console.log('1. Create .env file with: ANTHROPIC_API_KEY=your-key-here');
+            console.log('2. Run: npm install && npm start');
+            console.log('3. Refresh this page');
+        }
+    } else {
+        console.log('📱 Using direct API calls (legacy mode)');
+        if (!available) {
+            console.log('To enable: setApiKey("your-anthropic-api-key")');
+        }
     }
+    
     return available;
 };

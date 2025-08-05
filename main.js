@@ -45,7 +45,11 @@ class ASCIITerminal {
         this.paddingY = 2; // 2 character height on top and bottom
         
         // Vertical padding around title (in lines)
-        this.titleVerticalPadding = 3; // Empty lines above and below title
+        this.titleTopPadding = 7; // Empty lines above and below title
+        this.titleBottomPadding = 8;
+        
+        // Developer mode for verbose logging
+        this.developerMode = false;
         
         this.init();
         this.setupTerminal();
@@ -378,6 +382,14 @@ class ASCIITerminal {
         }
     }
     
+    scrollIfNeeded() {
+        // Scroll if cursor has moved beyond the terminal bounds
+        if (this.cursor.y >= this.rows) {
+            this.scrollUp();
+            this.cursor.y = this.rows - 1;
+        }
+    }
+    
     clear() {
         // Clear buffer (full screen)
         for (let y = 0; y < this.fullRows; y++) {
@@ -403,6 +415,41 @@ class ASCIITerminal {
             }
             this.cursor.x = 0;
         }
+    }
+
+    // Log a message to the terminal when in developer mode
+    devLog(message, color = null) {
+        if (!this.developerMode) return;
+        
+        const prefix = '[DEV] ';
+        const fullMessage = prefix + message;
+        
+        // Write the message with developer prefix
+        this.writeText(fullMessage, 0, this.cursor.y);
+        this.cursor.y++;
+        this.scrollIfNeeded();
+    }
+
+    // Toggle developer mode on/off
+    toggleDeveloperMode() {
+        this.developerMode = !this.developerMode;
+        const status = this.developerMode ? 'ENABLED' : 'DISABLED';
+        const emoji = this.developerMode ? '🔧' : '📵';
+        
+        this.writeText(`${emoji} Developer Mode ${status}`, 0, this.cursor.y);
+        this.cursor.y++;
+        
+        if (this.developerMode) {
+            this.writeText('    - Object actions will be logged during simulation', 0, this.cursor.y);
+            this.cursor.y++;
+            this.writeText('    - LLM calls and responses will be shown', 0, this.cursor.y);
+            this.cursor.y++;
+            this.writeText('    - Use "dev" command to toggle off', 0, this.cursor.y);
+            this.cursor.y++;
+        }
+        
+        this.scrollIfNeeded();
+        this.redrawInputLine();
     }
     
     async handleResize() {
@@ -463,11 +510,11 @@ class ASCIITerminal {
         }
     }
 
-    async demoText(titleFile = 'glowy.txt') {   
+    async demoText(titleFile = 'glowy.txt') {
         this.clear();
         
         // Add empty lines above title
-        for (let i = 0; i < this.titleVerticalPadding; i++) {
+        for (let i = 0; i < this.titleTopPadding; i++) {
             this.writeText("\n");
         }
         
@@ -493,12 +540,12 @@ class ASCIITerminal {
         this.writeCenteredText(randomMessage);
         
         // Add empty lines below title
-        for (let i = 0; i < this.titleVerticalPadding; i++) {
+        for (let i = 0; i < this.titleBottomPadding; i++) {
             this.writeText("\n");
         }
         
         this.writeText("Interactive terminal ready. Type and press Enter.");
-        this.writeText("\n");
+        this.writeText("\n\n");
         
         // Set up input prompt
         this.writeText(">> ");
@@ -614,7 +661,24 @@ class ASCIITerminal {
     }
 
     processCommand(input) {
-        const parts = input.split(' ');
+        // Debug logging to see what's happening
+        console.log(`[DEBUG] processCommand called with: "${input}"`);
+        console.log(`[DEBUG] Starts with '/': ${input.startsWith('/')}`);
+        
+        // Check if this is a command (starts with /) or a player action
+        if (!input.startsWith('/')) {
+            // This is a player action, not a command
+            console.log(`[DEBUG] Treating as player action: "${input}"`);
+            this.processPlayerAction(input);
+            return;
+        }
+        
+        console.log(`[DEBUG] Treating as command: "${input}"`);
+        
+        
+        // Strip the "/" and parse as command
+        const commandInput = input.slice(1); // Remove the "/"
+        const parts = commandInput.split(' ');
         const command = parts[0].toLowerCase();
         const args = parts.slice(1);
         
@@ -746,41 +810,54 @@ class ASCIITerminal {
                 this.writeText(`Simulation: ${world.isSimulating ? 'RUNNING' : 'STOPPED'}\n`);
                 this.writeText(`Time: ${world.simulationTime}\n`);
                 this.writeText(`Objects: ${world.objects.size}\n`);
-                this.writeText(`Root: ${world.rootObject ? world.rootObject.name : 'None'}\n\n`);
+                this.writeText(`Root: ${world.rootObject ? world.rootObject.name : 'None'}\n`);
+                this.writeText(`Developer Mode: ${this.developerMode ? 'ENABLED' : 'DISABLED'}\n\n`);
+                break;
+                
+            case 'dev':
+            case 'debug':
+                this.toggleDeveloperMode();
                 break;
                 
             case 'help':
             case '?':
-                this.writeText(`\n=== Available Commands ===\n`);
-                this.writeText(`look [object]         - Describe world or specific object\n`);
-                this.writeText(`examine <object>      - Detailed inspection of object\n`);
-                this.writeText(`list                  - List all objects\n`);
-                this.writeText(`who / me              - Show your character\n`);
-                this.writeText(`create <id> <name> <description> - Create new object\n`);
-                this.writeText(`move <object> <dest>  - Move object to new location\n`);
-                this.writeText(`relate <obj1> <rel> <obj2> [progress] - Add relationship\n`);
-                this.writeText(`save / load           - Save/load world state\n`);
-                this.writeText(`status                - Show world status\n`);
-                this.writeText(`help                  - Show this help\n\n`);
-                this.writeText(`=== Actions ===\n`);
-                this.writeText(`Anything else you type will be interpreted as an action.\n`);
+                this.writeText(`\n=== Available Commands (prefix with /) ===\n`);
+                this.writeText(`/look [object]        - Describe world or specific object\n`);
+                this.writeText(`/examine <object>     - Detailed inspection of object\n`);
+                this.writeText(`/list                 - List all objects\n`);
+                this.writeText(`/who / /me            - Show your character\n`);
+                this.writeText(`/create <id> <name> <description> - Create new object\n`);
+                this.writeText(`/move <object> <dest> - Move object to new location\n`);
+                this.writeText(`/relate <obj1> <rel> <obj2> [progress] - Add relationship\n`);
+                this.writeText(`/save / /load         - Save/load world state\n`);
+                this.writeText(`/status               - Show world status\n`);
+                this.writeText(`/dev                  - Toggle developer mode logging\n`);
+                this.writeText(`/help                 - Show this help\n\n`);
+                this.writeText(`=== Actions (no prefix) ===\n`);
+                this.writeText(`Anything without "/" will be interpreted as an action.\n`);
                 this.writeText(`Examples: "turn the steering wheel", "pet the cat", "look around"\n\n`);
                 break;
                 
             default:
-                // Treat everything else as a player action
-                this.writeText("Processing...\n");
-                world.processPlayerAction(input).then(result => {
-                    // Clear the "Processing..." line and show result
-                    this.clearLastLine();
-                    this.writeText(result);
-                }).catch(error => {
-                    console.error('Action processing failed:', error);
-                    this.clearLastLine();
-                    this.writeText(`Error: ${error.message}\n`);
-                });
+                // Unknown command
+                this.writeText(`Unknown command: /${command}\n`);
+                this.writeText(`Type /help for available commands.\n`);
                 break;
         }
+    }
+
+    processPlayerAction(input) {
+        // Process player action through world simulation
+        this.writeText("Processing...\n");
+        world.processPlayerAction(input).then(result => {
+            // Clear the "Processing..." line and show result
+            this.clearLastLine();
+            this.writeText(result);
+        }).catch(error => {
+            console.error('Action processing failed:', error);
+            this.clearLastLine();
+            this.writeText(`Error: ${error.message}\n`);
+        });
     }
     
     handleBackspace() {
@@ -1431,6 +1508,27 @@ window.testPadding = () => {
         // Call original handleEnter
         originalHandleEnter.call(this);
     };
+
+    // === DEVELOPER MODE FUNCTIONS ===
+    
+    window.toggleDev = () => {
+        terminal.toggleDeveloperMode();
+    };
+    
+    window.devMode = (enabled) => {
+        if (typeof enabled === 'boolean') {
+            terminal.developerMode = enabled;
+            const status = enabled ? 'ENABLED' : 'DISABLED';
+            terminal.writeText(`🔧 Developer Mode ${status}\n`);
+        } else {
+            terminal.writeText(`Developer Mode: ${terminal.developerMode ? 'ENABLED' : 'DISABLED'}\n`);
+        }
+        return terminal.developerMode;
+    };
+    
+    window.devLog = (message) => {
+        terminal.devLog(message);
+    };
     
     // Log available console commands
     console.log(`
@@ -1476,9 +1574,10 @@ window.testPadding = () => {
 ║   With API key: Uses Claude 3.5 Haiku for all responses     ║
 ║                                                              ║
 ║ === IN-GAME COMMANDS ===                                     ║
-║ Type commands directly in terminal:                          ║
-║ - look, examine <object>, list, who, save, load, help        ║
-║ - Any other text becomes a player action!                    ║
+║ Type commands with "/" prefix in terminal:                   ║
+║ - /look, /examine <object>, /list, /who, /save, /load, /help ║
+║ - /dev (toggle developer mode), /status                     ║
+║ - Any text WITHOUT "/" becomes a player action!             ║
 ║                                                              ║
 ║ terminal.clear()                 - Clear terminal            ║
 ║                                                              ║
@@ -1508,6 +1607,15 @@ window.testPadding = () => {
 ║                                                              ║
 ║ setCursorBlinkRate(ms)           - Set cursor blink speed    ║
 ║   Example: setCursorBlinkRate(1000) - 1 second blinks        ║
+║                                                              ║
+║ === DEVELOPER MODE ===                                       ║
+║ devMode()                        - Check developer mode status║
+║ devMode(true/false)              - Enable/disable dev mode   ║
+║ toggleDev()                      - Toggle developer mode     ║
+║ devLog(message)                  - Log message if dev mode on║
+║   🔧 When enabled: Logs all object actions during simulation║
+║   📜 Shows LLM calls, responses, and simulation flow        ║
+║   🎯 Great for debugging world behavior and LLM interactions║
 ║                                                              ║
 ║ Custom input handler:                                        ║
 ║   onTerminalInput = (text) => { ... }                        ║
