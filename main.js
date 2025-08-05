@@ -47,12 +47,6 @@ class ASCIITerminal {
         // Vertical padding around title (in lines)
         this.titleVerticalPadding = 3; // Empty lines above and below title
         
-        // CRT glow effect settings
-        this.glowEnabled = true;
-        this.glowOpacity = 0.3; // 0.0 to 1.0 
-        this.glowDistance = 40; // blur radius in pixels (larger = wider glow)
-        this.glowColor = [0, 255, 64]; // RGB values without opacity
-        
         this.init();
         this.setupTerminal();
         this.animate();
@@ -290,7 +284,7 @@ class ASCIITerminal {
                     charCtx.scale(dpr, dpr);
                     
                     // Set font properties - use November font with fallbacks
-                    const fontSize = Math.max(8, this.charHeight * 0.8);
+                    const fontSize = Math.max(8, this.charHeight * 0.85);
                     charCtx.font = `${fontSize}px 'November', 'DejaVu Sans Mono', 'Consolas', 'Monaco', 'Courier New', monospace`;
                     charCtx.textAlign = 'center';
                     charCtx.textBaseline = 'middle';
@@ -305,28 +299,11 @@ class ASCIITerminal {
                     // Clear the canvas first (transparent background)
                     charCtx.clearRect(0, 0, this.charWidth, this.charHeight);
                     
-                    // Draw the character at logical center with optional CRT glow effect
+                    // Draw the character at logical center with purple text
                     // Draw all characters except regular spaces (cursor █ should be drawn)
                     if (char !== ' ') {
-                        if (this.glowEnabled && this.glowOpacity > 0) {
-                            // Single-pass efficient glow: draw once with shadow
-                            const glowColorString = `rgba(${this.glowColor[0]}, ${this.glowColor[1]}, ${this.glowColor[2]}, ${this.glowOpacity})`;
-                            
-                            charCtx.shadowColor = glowColorString;
-                            charCtx.shadowBlur = this.glowDistance;
-                            charCtx.shadowOffsetX = 0;
-                            charCtx.shadowOffsetY = 0;
-                            charCtx.fillStyle = textColor;
-                            charCtx.fillText(char, this.charWidth / 2, this.charHeight / 2);
-                            
-                            // Reset shadow for potential second characters
-                            charCtx.shadowColor = 'transparent';
-                            charCtx.shadowBlur = 0;
-                        } else {
-                            // No glow - just draw the text
-                            charCtx.fillStyle = textColor;
-                            charCtx.fillText(char, this.charWidth / 2, this.charHeight / 2);
-                        }
+                        charCtx.fillStyle = textColor;
+                        charCtx.fillText(char, this.charWidth / 2, this.charHeight / 2);
                     }
                     
                     // Create new texture for this character
@@ -426,32 +403,6 @@ class ASCIITerminal {
             }
             this.cursor.x = 0;
         }
-    }
-
-    // Refresh all visible characters with current glow settings
-    refreshDisplay() {
-        // Clear entire texture cache to force regeneration with new glow settings
-        this.characterTextureCache.clear();
-        
-        // Force regeneration of all visible characters
-        for (let y = 0; y < this.fullRows; y++) {
-            for (let x = 0; x < this.fullCols; x++) {
-                const char = this.buffer[y] && this.buffer[y][x];
-                if (char && char !== ' ') {
-                    // Update the mesh to use new texture with current glow settings
-                    const mesh = this.characterMeshes[y][x];
-                    if (mesh && mesh.visible) {
-                        // Trigger texture regeneration
-                        const screenX = x - this.paddingX;
-                        const screenY = y - this.paddingY;
-                        if (screenX >= 0 && screenX < this.cols && screenY >= 0 && screenY < this.rows) {
-                            this.updateCharacter(screenX, screenY, char);
-                        }
-                    }
-                }
-            }
-        }
-        console.log(`Display refreshed: glow ${this.glowEnabled ? 'enabled' : 'disabled'}, opacity: ${this.glowOpacity}, distance: ${this.glowDistance}px`);
     }
     
     async handleResize() {
@@ -1252,58 +1203,6 @@ window.testPadding = () => {
         console.log('Terminal cleared and reset for input');
     };
     
-    // CRT Glow Control Functions
-    window.setGlowOpacity = (opacity) => {
-        terminal.glowOpacity = Math.max(0, Math.min(1.0, opacity));
-        terminal.characterTextureCache.clear(); // Clear cache to regenerate with new glow
-        terminal.refreshDisplay();
-        console.log(`Glow opacity set to ${terminal.glowOpacity}`);
-    };
-    
-    window.setGlowDistance = (distance) => {
-        terminal.glowDistance = Math.max(0, Math.min(100, distance));
-        terminal.characterTextureCache.clear(); // Clear cache to regenerate with new glow
-        terminal.refreshDisplay();
-        console.log(`Glow distance set to ${terminal.glowDistance}px`);
-    };
-    
-    window.toggleGlow = () => {
-        terminal.glowEnabled = !terminal.glowEnabled;
-        terminal.characterTextureCache.clear(); // Clear cache to regenerate
-        terminal.refreshDisplay();
-        console.log(`Glow ${terminal.glowEnabled ? 'enabled' : 'disabled'}`);
-    };
-    
-    window.setGlowColor = (r, g, b) => {
-        if (Array.isArray(r)) {
-            terminal.glowColor = r.slice(0, 3); // Take first 3 elements
-        } else if (typeof r === 'string') {
-            // Parse RGB string like "rgb(255, 100, 0)"
-            const match = r.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
-            if (match) {
-                terminal.glowColor = [parseInt(match[1]), parseInt(match[2]), parseInt(match[3])];
-            }
-        } else {
-            terminal.glowColor = [r, g, b];
-        }
-        terminal.characterTextureCache.clear(); // Clear cache to regenerate with new color
-        terminal.refreshDisplay();
-        console.log(`Glow color set to rgb(${terminal.glowColor.join(', ')})`);
-    };
-    
-    window.glowPresets = () => {
-        console.log('CRT Glow Controls:');
-        console.log('setGlowOpacity(0.3)               - Subtle glow');
-        console.log('setGlowOpacity(0.6)               - Strong glow');
-        console.log('setGlowDistance(20)               - Tight glow');
-        console.log('setGlowDistance(60)               - Wide glow');
-        console.log('setGlowColor(0, 255, 64)          - Classic green');
-        console.log('setGlowColor(255, 100, 0)         - Amber/orange');
-        console.log('setGlowColor(0, 150, 255)         - Blue');
-        console.log('setGlowColor(255, 0, 255)         - Magenta');
-        console.log('toggleGlow()                      - Enable/disable');
-    };
-    
     // Cursor control
     window.setCursorBlinkRate = (milliseconds) => {
         if (terminal.cursorInterval) {
@@ -1570,6 +1469,7 @@ window.testPadding = () => {
 ║ saveWorld() / loadWorld()        - Save/load world state     ║
 ║                                                              ║
 ║ === LLM INTEGRATION ===                                      ║
+║ SETUP: cp config.example.js config.js, add your API key     ║
 ║ setApiKey("your-key")            - Configure Claude API key  ║
 ║ checkLLM()                       - Check LLM status          ║
 ║   Without API key: Uses basic fallback reactions             ║

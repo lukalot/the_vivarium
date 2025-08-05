@@ -10,6 +10,28 @@ class LLMManager {
         this.narrativeMaxTokens = 250; // Allow more tokens for narrative generation
         this.requestQueue = [];
         this.processing = false;
+        
+        // Try to auto-load API key from config
+        this.loadConfigApiKey();
+    }
+
+    // Try to load API key from config.js
+    loadConfigApiKey() {
+        try {
+            if (window.VIVARIUM_CONFIG && window.VIVARIUM_CONFIG.ANTHROPIC_API_KEY) {
+                const configKey = window.VIVARIUM_CONFIG.ANTHROPIC_API_KEY;
+                if (configKey && configKey !== "your-api-key-here") {
+                    this.apiKey = configKey;
+                    console.log('API key loaded from config.js');
+                } else {
+                    console.log('Config found but API key not set. Update config.js with your Anthropic API key.');
+                }
+            } else {
+                console.log('No config.js found or ANTHROPIC_API_KEY not defined. Use setApiKey() manually.');
+            }
+        } catch (error) {
+            console.log('Could not load config.js:', error.message);
+        }
     }
 
     // Set API key (call this first!)
