@@ -1,0 +1,20 @@
+{
+  "name": "the-vivarium",
+  "version": "1.0.0",
+  "description": "A dynamic universe simulation game with hierarchical LLM-driven agents",
+  "main": "index.html",
+  "scripts": {
+    "start": "bunx serve .",
+    "dev": "bunx live-server . --port=3000 --open"
+  },
+  "dependencies": {
+    "three": "^0.158.0"
+  },
+  "devDependencies": {
+    "serve": "^14.2.1",
+    "live-server": "^1.2.2"
+  },
+  "keywords": ["simulation", "game", "llm", "three.js", "ascii"],
+  "author": "",
+  "license": "MIT"
+}

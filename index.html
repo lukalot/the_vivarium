@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Vivarium - Universe Simulation</title>
+    <style>
+        @font-face {
+            font-family: 'November';
+            src: url('./assets/fonts/november.ttf') format('truetype');
+            font-weight: normal;
+            font-style: normal;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: #000;
+            overflow: hidden;
+            font-family: 'November', 'Courier New', monospace;
+        }
+        
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+        
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            outline: none; /* Remove focus outline */
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container">
+        <canvas id="three-canvas"></canvas>
+    </div>
+
+    <script type="module" src="main.js"></script>
+</body>
+</html>
