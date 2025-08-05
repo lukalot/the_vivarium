@@ -47,6 +47,11 @@ class ASCIITerminal {
         // Vertical padding around title (in lines)
         this.titleVerticalPadding = 3; // Empty lines above and below title
         
+        // CRT glow effect settings
+        this.glowEnabled = false;
+        this.glowIntensity = 1.0; // 0.0 to 2.0 scale factor
+        this.glowColor = 'rgb(0, 255, 64, 0.3)'; // Bright green glow
+        
         this.init();
         this.setupTerminal();
         this.animate();
@@ -290,7 +295,7 @@ class ASCIITerminal {
                     charCtx.textBaseline = 'middle';
                     
                     // Text color stays the same purple
-                    const textColor = '#9d00ff';
+                    const textColor = 'rgb(0, 99, 23)';
                     
                     // Enable high-quality text rendering
                     charCtx.textRenderingOptimization = 'optimizeQuality';
@@ -299,11 +304,45 @@ class ASCIITerminal {
                     // Clear the canvas first (transparent background)
                     charCtx.clearRect(0, 0, this.charWidth, this.charHeight);
                     
-                    // Draw the character at logical center with purple text
+                    // Draw the character at logical center with optional CRT glow effect
                     // Draw all characters except regular spaces (cursor █ should be drawn)
                     if (char !== ' ') {
+                        // Save the context state
+                        charCtx.save();
+                        
+                        if (this.glowEnabled && this.glowIntensity > 0) {
+                            // CRT-style glow effect: draw multiple passes with increasing blur
+                            const intensity = this.glowIntensity;
+                            
+                            // Draw outer glow (widest, most transparent)
+                            charCtx.shadowColor = this.glowColor;
+                            charCtx.shadowBlur = 100;
+                            charCtx.shadowOffsetX = 0;
+                            charCtx.shadowOffsetY = 0;
+                            charCtx.fillStyle = this.glowColor;
+                            charCtx.globalAlpha = 0.3;
+                            charCtx.fillText(char, this.charWidth / 2, this.charHeight / 2);
+                            
+                            // Draw medium glow
+                            charCtx.shadowBlur = 12 * intensity;
+                            charCtx.globalAlpha = 0.5 * intensity;
+                            charCtx.fillText(char, this.charWidth / 2, this.charHeight / 2);
+                            
+                            // Draw inner glow
+                            charCtx.shadowBlur = 6 * intensity;
+                            charCtx.globalAlpha = 0.8 * intensity;
+                            charCtx.fillText(char, this.charWidth / 2, this.charHeight / 2);
+                        }
+                        
+                        // Reset shadow and draw the main text (no shadow, full opacity)
+                        charCtx.shadowColor = 'transparent';
+                        charCtx.shadowBlur = 0;
+                        charCtx.globalAlpha = 1.0;
                         charCtx.fillStyle = textColor;
                         charCtx.fillText(char, this.charWidth / 2, this.charHeight / 2);
+                        
+                        // Restore the context state
+                        charCtx.restore();
                     }
                     
                     // Create new texture for this character
@@ -403,6 +442,31 @@ class ASCIITerminal {
             }
             this.cursor.x = 0;
         }
+    }
+
+    // Refresh all visible characters with current glow settings
+    refreshDisplay() {
+        // Force regeneration of all visible characters
+        for (let y = 0; y < this.fullRows; y++) {
+            for (let x = 0; x < this.fullCols; x++) {
+                const char = this.buffer[y] && this.buffer[y][x];
+                if (char && char !== ' ') {
+                    // Force regeneration by temporarily clearing this character from cache
+                    this.characterTextureCache.delete(char);
+                    // Update the mesh to use new texture
+                    const mesh = this.characterMeshes[y][x];
+                    if (mesh && mesh.visible) {
+                        // Trigger texture regeneration
+                        const screenX = x - this.paddingX;
+                        const screenY = y - this.paddingY;
+                        if (screenX >= 0 && screenX < this.cols && screenY >= 0 && screenY < this.rows) {
+                            this.updateCharacter(screenX, screenY, char);
+                        }
+                    }
+                }
+            }
+        }
+        console.log('Display refreshed with new glow settings');
     }
     
     async handleResize() {
@@ -1174,30 +1238,6 @@ window.testPadding = () => {
         console.log('Unicode test characters drawn on row 1');
     };
     
-    // Function to add debug panel back if needed
-    window.showDebugPanel = () => {
-        if (document.getElementById('debug-info')) {
-            console.log('Debug panel already exists');
-            return;
-        }
-        
-        const debugHTML = `
-            <div id="debug-info" style="position: absolute; top: 10px; left: 10px; color: #9d00ff; font-family: 'Courier New', monospace; font-size: 11px; z-index: 100; background: rgba(0, 0, 0, 0.8); padding: 8px 12px; border-radius: 5px; border: 1px solid #9d00ff; line-height: 1.4;">
-                <div><strong>ADAPTIVE TERMINAL SCALING</strong></div>
-                <div>Actual: <span id="terminal-size">0x0</span> chars</div>
-                <div>Target: <span id="target-size">0x0</span> chars</div>
-                <div>Window: <span id="window-size">0x0</span> px</div>
-                <div>Char Size: <span id="char-size">0x0</span> px</div>
-                <div>Scale Factor: <span id="scale-factor">0.0</span></div>
-                <div>Device Pixel Ratio: <span id="pixel-ratio">0.0</span></div>
-            </div>
-        `;
-        
-        document.getElementById('canvas-container').insertAdjacentHTML('beforeend', debugHTML);
-        terminal.updateTerminalDimensions(); // Refresh debug info
-        console.log('Debug panel added');
-    };
-    
     window.hideDebugPanel = () => {
         const debugPanel = document.getElementById('debug-info');
         if (debugPanel) {
@@ -1225,6 +1265,40 @@ window.testPadding = () => {
         terminal.inputStartX = terminal.cursor.x;
         terminal.inputBuffer = '';
         console.log('Terminal cleared and reset for input');
+    };
+    
+    // CRT Glow Control Functions
+    window.setGlowIntensity = (intensity) => {
+        terminal.glowIntensity = Math.max(0, Math.min(2.0, intensity));
+        terminal.characterTextureCache.clear(); // Clear cache to regenerate with new glow
+        terminal.refreshDisplay();
+        console.log(`Glow intensity set to ${terminal.glowIntensity}`);
+    };
+    
+    window.toggleGlow = () => {
+        terminal.glowEnabled = !terminal.glowEnabled;
+        terminal.characterTextureCache.clear(); // Clear cache to regenerate
+        terminal.refreshDisplay();
+        console.log(`Glow ${terminal.glowEnabled ? 'enabled' : 'disabled'}`);
+    };
+    
+    window.setGlowColor = (color) => {
+        terminal.glowColor = color;
+        terminal.characterTextureCache.clear(); // Clear cache to regenerate with new color
+        terminal.refreshDisplay();
+        console.log(`Glow color set to ${color}`);
+    };
+    
+    window.glowPresets = () => {
+        console.log('CRT Glow Presets:');
+        console.log('setGlowColor("rgb(0, 255, 64)")   - Classic green');
+        console.log('setGlowColor("rgb(255, 100, 0)")  - Amber/orange');
+        console.log('setGlowColor("rgb(0, 150, 255)")  - Blue');
+        console.log('setGlowColor("rgb(255, 0, 255)")  - Magenta');
+        console.log('setGlowIntensity(0.5)             - Subtle glow');
+        console.log('setGlowIntensity(1.0)             - Normal glow');
+        console.log('setGlowIntensity(1.5)             - Strong glow');
+        console.log('toggleGlow()                      - Enable/disable');
     };
     
     // Cursor control
@@ -1315,7 +1389,7 @@ window.testPadding = () => {
     // Test some more visible background color schemes
     window.testVisibleColors = () => {
         console.log('Testing more visible background color combinations:');
-        console.log('(Text stays purple #9d00ff in all cases)');
+        console.log('(Text stays purple #rgb(0, 182, 64) in all cases)');
         console.log('1. setRowColors("#2a2a2a", "#1a1a1a") - Subtle gray alternation');
         console.log('2. setRowColors("#1a1a2a", "#0a0a1a") - Subtle blue alternation');
         console.log('3. setRowColors("#2a1a1a", "#1a0a0a") - Subtle red alternation');
@@ -1484,24 +1558,24 @@ window.testPadding = () => {
 ║ look(objectId)                   - Describe world/object     ║
 ║ listObjects()                    - List all world objects    ║
 ║ inspect(objectId)                - Get detailed object info  ║
-║ createObject(id, name, desc, parentId) - Create new object  ║
-║ moveObject(objectId, newParentId) - Move object             ║
-║ addRelationship(from, rel, to, progress) - Add relationship ║
-║ act(action)                      - Process player action    ║
-║   Example: act("turn the steering wheel")                   ║
+║ createObject(id, name, desc, parentId) - Create new object   ║
+║ moveObject(objectId, newParentId) - Move object              ║
+║ addRelationship(from, rel, to, progress) - Add relationship  ║
+║ act(action)                      - Process player action     ║
+║   Example: act("turn the steering wheel")                    ║
 ║ demoActions()                    - Test narrator with examples║
-║ saveWorld() / loadWorld()        - Save/load world state    ║
+║ saveWorld() / loadWorld()        - Save/load world state     ║
 ║                                                              ║
 ║ === LLM INTEGRATION ===                                      ║
-║ setApiKey("your-key")            - Configure Claude API key ║
-║ checkLLM()                       - Check LLM status         ║
-║   Without API key: Uses basic fallback reactions            ║
-║   With API key: Uses Claude 3.5 Haiku for rich responses   ║
+║ setApiKey("your-key")            - Configure Claude API key  ║
+║ checkLLM()                       - Check LLM status          ║
+║   Without API key: Uses basic fallback reactions             ║
+║   With API key: Uses Claude 3.5 Haiku for rich responses     ║
 ║                                                              ║
 ║ === IN-GAME COMMANDS ===                                     ║
 ║ Type commands directly in terminal:                          ║
-║ - look, examine <object>, list, who, save, load, help       ║
-║ - Any other text becomes a player action!                   ║
+║ - look, examine <object>, list, who, save, load, help        ║
+║ - Any other text becomes a player action!                    ║
 ║                                                              ║
 ║ terminal.clear()                 - Clear terminal            ║
 ║                                                              ║
@@ -1511,9 +1585,9 @@ window.testPadding = () => {
 ║ testUnicode()                    - Test Unicode characters   ║
 ║ testFont()                       - Test November font        ║
 ║ testColors()                     - Test full-width row backgrounds║
-║ testTyping()                     - Test keyboard input          ║
-║ debugInput()                     - Debug input system state    ║
-║ focusTerminal()                  - Focus terminal for input    ║
+║ testTyping()                     - Test keyboard input       ║
+║ debugInput()                     - Debug input system state  ║
+║ focusTerminal()                  - Focus terminal for input  ║
 ║ testKeyboardEvents()             - Test if keyboard events work║
 ║ listTitles()                     - Show available ASCII titles ║
 ║ loadTitle(filename)              - Load different ASCII title  ║
@@ -1524,10 +1598,7 @@ window.testPadding = () => {
 ║ clearTextureCache()              - Clear character texture cache║
 ║ testVisibleColors()              - Show background color examples║
 ║ refreshDisplay()                 - Refresh all characters    ║
-║                                                              ║
-║ showDebugPanel()                 - Show debug info panel     ║
-║ hideDebugPanel()                 - Hide debug info panel     ║
-║                                                              ║
+║                                                              ║                                                              ║
 ║ enableInput()                    - Enable terminal input     ║
 ║ disableInput()                   - Disable terminal input    ║
 ║ clearTerminal()                  - Clear and reset terminal  ║
