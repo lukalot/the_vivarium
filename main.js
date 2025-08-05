@@ -25,11 +25,11 @@ class ASCIITerminal {
     this.buffer = [];
     this.cursor = { x: 0, y: 0 };
 
-    // Input handling
-    this.inputMode = true; // Whether we're accepting input
-    this.inputBuffer = ""; // Current line being typed
-    this.inputStartX = 0; // Where the current input line starts
-    this.showCursor = true; // For blinking cursor
+    // Menu state
+    this.menuMode = true; // Whether we're in menu mode
+    this.selectedMenuItem = 0; // 0 = Vivarium Mode, 1 = Sandbox Mode
+    this.menuStartY = 0; // Store where the menu starts
+    this.menuItems = ["VIVARIUM MODE", "SANDBOX MODE"];
 
     // Three.js objects for each character
     this.characterMeshes = [];
@@ -42,7 +42,8 @@ class ASCIITerminal {
 
     // Rainbow animation properties
     this.rainbowFrame = 0;
-    this.rainbowUpdateInterval = 40; // Update colors every 25 frames
+    this.rainbowUpdateInterval = 10; // Update colors every frame
+    this.rainbowAnimationSpeed = 0.1; // How fast the rainbow moves (was 1/40)
     this.titleArea = { startY: 0, endY: 0, centerX: 0, centerY: 0 };
     this.isRainbowCharacter = new Map(); // Track which positions should be rainbow
     this.rainbowPalette = [
@@ -310,31 +311,30 @@ class ASCIITerminal {
             let angle = Math.atan2(dy, dx);
             if (angle < 0) angle += 2 * Math.PI;
 
+            // Add rotation that increases with time
+            const rotationOffset =
+              this.rainbowFrame * this.rainbowAnimationSpeed * 0.1;
+            angle += rotationOffset;
+
             // Apply spiral transformation: add rotation based on distance
             const spiralOffset = distance * this.spiralTightness;
 
             // Calculate which color ring this character is in, including spiral rotation
             const ring = Math.floor(distance / this.ringWidth);
-            // Add animation offset based on frame count
-            const animOffset = Math.floor(
-              this.rainbowFrame / this.rainbowUpdateInterval,
-            );
 
             // Add angular component to create spiral
             // Use round instead of floor for more symmetric distribution
             const angleContribution =
               Math.round((angle + spiralOffset) / (Math.PI / 4)) % 8;
             colorIndex =
-              (ring + animOffset + angleContribution) %
-              this.rainbowPalette.length;
+              (ring + angleContribution) % this.rainbowPalette.length;
           } else {
             // Original radial pattern
             const ring = Math.floor(distance / this.ringWidth);
-            // Add animation offset based on frame count
-            const animOffset = Math.floor(
-              this.rainbowFrame / this.rainbowUpdateInterval,
-            );
-            colorIndex = (ring + animOffset) % this.rainbowPalette.length;
+            // Add animation offset based on continuous frame count
+            const animOffset = this.rainbowFrame * this.rainbowAnimationSpeed;
+            colorIndex =
+              Math.floor(ring + animOffset) % this.rainbowPalette.length;
           }
           textColor = this.rainbowPalette[colorIndex];
         }
@@ -588,28 +588,74 @@ class ASCIITerminal {
       this.writeText("\n");
     }
 
-    this.writeText("Interactive terminal ready. Type and press Enter.");
-    this.writeText("\n");
-
-    // Set up input prompt
-    this.writeText(">> ");
-    this.inputStartX = this.cursor.x;
-    this.inputBuffer = "";
-
-    // Add blinking cursor
-    this.addBlinkingCursor();
+    // Display menu
+    this.displayMenu();
 
     // Update row backgrounds only (don't render all characters yet)
     this.updateRowBackgrounds();
   }
 
-  addBlinkingCursor() {
-    this.cursorInterval = setInterval(() => {
-      if (this.inputMode) {
-        this.showCursor = !this.showCursor;
-        this.redrawInputLine(); // Redraw to update cursor
+  displayMenu() {
+    // Store where menu starts
+    this.menuStartY = this.cursor.y;
+    
+    // Display menu items
+    this.menuItems.forEach((item, index) => {
+      const isSelected = index === this.selectedMenuItem;
+      const prefix = isSelected ? "► " : "  ";
+      const text = prefix + item;
+      
+      // Center the menu item
+      const centerX = Math.floor((this.cols - text.length) / 2);
+      this.writeText(text, centerX, this.cursor.y);
+      
+      // Move to next line with spacing
+      this.cursor.y += 2;
+    });
+    
+    // Instructions at bottom
+    this.cursor.y += 2;
+    this.writeCenteredText("↑/↓ Navigate    ENTER Select    ESC Quit");
+  }
+  
+  updateMenu() {
+    // Clear the menu area
+    const menuHeight = 10; // Approximate height to clear
+    for (let y = this.menuStartY; y < this.menuStartY + menuHeight; y++) {
+      for (let x = 0; x < this.cols; x++) {
+        this.updateCharacter(x, y, ' ');
       }
-    }, 700); // Slower blink rate - 750ms feels more natural
+    }
+    
+    // Reset cursor to menu start and redraw
+    this.cursor.y = this.menuStartY;
+    this.displayMenu();
+  }
+  
+  enterMode(modeIndex) {
+    // Clear screen and rainbow effects
+    this.clear();
+    this.menuMode = false;
+    
+    // Clear all rainbow tracking
+    this.isRainbowCharacter.clear();
+    
+    if (modeIndex === 0) {
+      // Vivarium Mode - Interactive terminal
+      this.writeText("=== ENTERING THE VIVARIUM ===\n\n");
+      this.writeText("You are now inside the simulation.\n");
+      this.writeText("Reality awaits your commands.\n\n");
+      this.writeText(">> ");
+      this.inputMode = true;
+      this.inputStartX = this.cursor.x;
+      this.inputBuffer = "";
+    } else {
+      // Sandbox Mode - Coming soon
+      this.writeText("=== SANDBOX MODE ===\n\n");
+      this.writeText("The experimental playground is still under construction.\n");
+      this.writeText("Strange energies prevent access at this time.\n\n");
+      this.writeText("(Press ESC to return to menu)\n");
+    }
   }
 
   setupKeyboardInput() {
@@ -632,76 +678,126 @@ class ASCIITerminal {
   }
 
   handleKeyDown(event) {
-    console.log(`KeyDown: "${event.key}", inputMode: ${this.inputMode}`);
+    console.log(`KeyDown: "${event.key}", menuMode: ${this.menuMode}, inputMode: ${this.inputMode}`);
 
-    if (!this.inputMode) return;
-
-    switch (event.key) {
-      case "Enter":
-        console.log("Processing Enter key");
-        this.handleEnter();
-        event.preventDefault();
-        break;
-      case "Backspace":
-        console.log("Processing Backspace key");
-        this.handleBackspace();
-        event.preventDefault();
-        break;
-      case "ArrowLeft":
-      case "ArrowRight":
-      case "ArrowUp":
-      case "ArrowDown":
-        // Handle arrow keys if needed later
-        event.preventDefault();
-        break;
-      default:
-        // Let keypress handle regular characters
-        break;
+    if (this.menuMode) {
+      switch (event.key) {
+        case "ArrowUp":
+          this.selectedMenuItem = (this.selectedMenuItem - 1 + this.menuItems.length) % this.menuItems.length;
+          this.updateMenu();
+          event.preventDefault();
+          break;
+        case "ArrowDown":
+          this.selectedMenuItem = (this.selectedMenuItem + 1) % this.menuItems.length;
+          this.updateMenu();
+          event.preventDefault();
+          break;
+        case "Enter":
+          console.log(`Selected: ${this.menuItems[this.selectedMenuItem]}`);
+          this.enterMode(this.selectedMenuItem);
+          event.preventDefault();
+          break;
+        case "Escape":
+          console.log("ESC pressed - would quit");
+          event.preventDefault();
+          break;
+      }
+    } else {
+      // In-mode handling
+      switch (event.key) {
+        case "Escape":
+          this.returnToMenu();
+          event.preventDefault();
+          break;
+        case "Enter":
+          if (this.inputMode) {
+            this.handleEnter();
+            event.preventDefault();
+          }
+          break;
+        case "Backspace":
+          if (this.inputMode) {
+            this.handleBackspace();
+            event.preventDefault();
+          }
+          break;
+      }
     }
   }
 
   handleKeyPress(event) {
-    console.log(
-      `KeyPress: "${event.key}" (charCode: ${event.charCode}), inputMode: ${this.inputMode}`,
-    );
-
-    if (!this.inputMode) return;
-
-    // Only handle printable characters
-    if (event.charCode >= 32 && event.charCode <= 126) {
-      console.log(`Processing printable character: "${event.key}"`);
-      this.addCharacterToInput(event.key);
+    if (this.menuMode) {
       event.preventDefault();
-    } else {
-      console.log(
-        `Ignoring non-printable character with charCode: ${event.charCode}`,
-      );
+      return;
     }
+    
+    if (this.inputMode) {
+      // Handle printable characters
+      if (event.charCode >= 32 && event.charCode <= 126) {
+        this.addCharacterToInput(event.key);
+        event.preventDefault();
+      }
+    }
+  }
+  
+  returnToMenu() {
+    this.clear();
+    this.menuMode = true;
+    this.inputMode = false;
+    this.inputBuffer = "";
+    this.demoText(); // Redisplay the menu with rainbow title
   }
 
   handleEnter() {
-    // Process the input (for now, just log it)
+    // Process the input
     console.log(`User input: "${this.inputBuffer}"`);
-
+    
     // Move to next line
     this.cursor.y++;
     this.cursor.x = 0;
-    this.inputStartX = 0;
-    this.inputBuffer = "";
-
-    // Scroll if needed
-    if (this.cursor.y >= this.rows) {
-      this.scrollUp();
-      this.cursor.y = this.rows - 1;
-    }
-
+    
+    // Echo the command
+    this.writeText(`Command: ${this.inputBuffer}\n`);
+    
     // Add prompt for next input
     this.writeText(">> ");
     this.inputStartX = this.cursor.x;
-
-    // Ensure cursor is visible for new input
-    this.showCursor = true;
+    this.inputBuffer = "";
+  }
+  
+  handleBackspace() {
+    if (this.inputBuffer.length > 0) {
+      this.inputBuffer = this.inputBuffer.slice(0, -1);
+      this.redrawInputLine();
+    }
+  }
+  
+  addCharacterToInput(char) {
+    // Add to input buffer
+    this.inputBuffer += char;
+    
+    // Check if we need to wrap
+    const maxLineLength = this.cols - this.inputStartX - 1;
+    if (this.inputBuffer.length >= maxLineLength) {
+      this.inputBuffer = this.inputBuffer.slice(0, -1);
+      return;
+    }
+    
     this.redrawInputLine();
+  }
+  
+  redrawInputLine() {
+    // Clear the current input area
+    for (let i = this.inputStartX; i < this.cols; i++) {
+      this.updateCharacter(i, this.cursor.y, ' ');
+    }
+    
+    // Draw the input buffer
+    for (let i = 0; i < this.inputBuffer.length; i++) {
+      const char = this.inputBuffer[i];
+      const x = this.inputStartX + i;
+      this.updateCharacter(x, this.cursor.y, char);
+    }
   }
 
   handleBackspace() {
