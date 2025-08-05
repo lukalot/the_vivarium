@@ -1472,8 +1472,8 @@ window.testPadding = () => {
 ║ SETUP: cp config.example.js config.js, add your API key     ║
 ║ setApiKey("your-key")            - Configure Claude API key  ║
 ║ checkLLM()                       - Check LLM status          ║
-║   Without API key: Uses basic fallback reactions             ║
-║   With API key: Uses Claude 3.5 Haiku for rich responses     ║
+║   ⚠️  REQUIRED: Narrator now requires LLM - no fallbacks    ║
+║   With API key: Uses Claude 3.5 Haiku for all responses     ║
 ║                                                              ║
 ║ === IN-GAME COMMANDS ===                                     ║
 ║ Type commands directly in terminal:                          ║

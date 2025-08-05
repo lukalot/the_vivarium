@@ -372,56 +372,29 @@ class World {
             containerDescription: playerParent.description
         };
 
-        // Use LLM to generate the narrative
-        if (window.llmManager && window.llmManager.isAvailable()) {
-            try {
-                return await window.llmManager.generateNarrative(
-                    playerAction, 
-                    parentAction, 
-                    siblingActions, 
-                    contextInfo
-                );
-            } catch (error) {
-                console.warn('LLM narrative generation failed, using fallback:', error);
-                return this.generateFallbackNarration(parentAction, siblingActions);
-            }
-        } else {
-            return this.generateFallbackNarration(parentAction, siblingActions);
+        // Use LLM to generate the narrative (no fallbacks - show errors)
+        if (!window.llmManager) {
+            return "\n❌ LLM Manager not loaded. Check console for errors.\n";
+        }
+
+        try {
+            return await window.llmManager.generateNarrative(
+                playerAction, 
+                parentAction, 
+                siblingActions, 
+                contextInfo
+            );
+        } catch (error) {
+            // Show the error to the user instead of falling back silently
+            console.error('LLM narrative generation failed:', error);
+            return `\n❌ Narrative Error: ${error.message}\n\nTip: Use checkLLM() to verify your setup.\n`;
         }
     }
 
-    // Generate fallback narration when LLM is not available
+    // Legacy fallback method (no longer used - narrator now requires LLM)
     generateFallbackNarration(parentAction, siblingActions) {
-        let narrative = "\n";
-        
-        // Describe sibling actions first
-        if (siblingActions && siblingActions.length > 0) {
-            siblingActions.forEach(({ objectName, action }) => {
-                if (action !== "remains still" && action !== "no action") {
-                    narrative += `The ${objectName.toLowerCase()} ${action}. `;
-                }
-            });
-        }
-
-        // Then describe container reaction
-        if (parentAction && parentAction !== "remains still") {
-            narrative += `The vessel ${parentAction}. `;
-        }
-
-        if (narrative.trim() === "") {
-            const ambientOptions = [
-                "The silence is profound.",
-                "Nothing stirs. Time seems suspended.",
-                "A moment of stillness settles over everything.",
-                "Everything remains perfectly quiet."
-            ];
-            const chosen = ambientOptions[Math.floor(Math.random() * ambientOptions.length)];
-            narrative = `\n${chosen}\n`;
-        } else {
-            narrative += "\n";
-        }
-        
-        return narrative;
+        console.warn('generateFallbackNarration() called but narrator now requires LLM. Use checkLLM() to verify setup.');
+        return "\n❌ Fallback narration disabled. Please configure LLM in config.js\n";
     }
 
     // Legacy method for compatibility (now deprecated)

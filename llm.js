@@ -175,7 +175,7 @@ Your response:`;
     // Generate a narrative summary from the player's perspective
     async generateNarrative(playerAction, parentAction, siblingActions, contextInfo) {
         if (!this.isAvailable()) {
-            return this.fallbackNarrative(playerAction, parentAction, siblingActions);
+            throw new Error('LLM not available. Please configure your API key in config.js or use setApiKey().');
         }
 
         const prompt = this.buildNarrativePrompt(playerAction, parentAction, siblingActions, contextInfo);
@@ -184,8 +184,7 @@ Your response:`;
             const response = await this.callClaude(prompt, this.narrativeMaxTokens);
             return this.parseNarrativeResponse(response);
         } catch (error) {
-            console.warn('LLM narrative generation failed, using fallback:', error.message);
-            return this.fallbackNarrative(playerAction, parentAction, siblingActions);
+            throw new Error(`LLM narrative generation failed: ${error.message}`);
         }
     }
 
@@ -234,31 +233,10 @@ Your narrative:`;
         return `\n${narrative}\n`;
     }
 
-    // Fallback narrative when LLM is unavailable
+    // Legacy fallback method (no longer used - narrator now requires LLM)
     fallbackNarrative(playerAction, parentAction, siblingActions) {
-        let narrative = "\n";
-        
-        // Describe sibling actions first
-        if (siblingActions && siblingActions.length > 0) {
-            siblingActions.forEach(({ objectName, action }) => {
-                if (action !== "remains still" && action !== "no action") {
-                    narrative += `The ${objectName.toLowerCase()} ${action}. `;
-                }
-            });
-        }
-
-        // Then describe container reaction
-        if (parentAction && parentAction !== "remains still") {
-            narrative += `The vessel ${parentAction}. `;
-        }
-
-        if (narrative.trim() === "") {
-            narrative = "\nNothing seems to happen.\n";
-        } else {
-            narrative += "\n";
-        }
-        
-        return narrative;
+        console.warn('fallbackNarrative() called but narrator now requires LLM. Use checkLLM() to verify setup.');
+        throw new Error('Fallback narrative disabled. Please configure LLM with setApiKey() or config.js');
     }
 
     // Batch simulate multiple objects (for future optimization)
