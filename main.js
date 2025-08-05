@@ -45,7 +45,7 @@ class ASCIITerminal {
         this.paddingY = 2; // 2 character height on top and bottom
         
         // Vertical padding around title (in lines)
-        this.titleVerticalPadding = 4; // Empty lines above and below title
+        this.titleVerticalPadding = 3; // Empty lines above and below title
         
         this.init();
         this.setupTerminal();
@@ -392,6 +392,18 @@ class ASCIITerminal {
         this.cursor.x = 0;
         this.cursor.y = 0;
     }
+
+    // Clear the last line of text (for removing "Processing..." messages)
+    clearLastLine() {
+        if (this.cursor.y > 0) {
+            this.cursor.y--;
+            // Clear the entire line
+            for (let x = 0; x < this.cols; x++) {
+                this.updateCharacter(x, this.cursor.y, ' ');
+            }
+            this.cursor.x = 0;
+        }
+    }
     
     async handleResize() {
         // Update camera
@@ -471,7 +483,11 @@ class ASCIITerminal {
             "You're not supposed to be here",
             "This isn't a game",
             "Hyperstition is necessary",
-            "Assistant is in a CLI mood today"
+            "Assistant is in a CLI mood today",
+            "Insert coin to continue",
+            "At the end of everything, you'll come here",
+            "A message from dot in the sky",
+            "A reflection on why the sky is blue",
         ];
         const randomMessage = messages[Math.floor(Math.random() * messages.length)];
         this.writeCenteredText(randomMessage);
@@ -569,19 +585,23 @@ class ASCIITerminal {
     }
     
     handleEnter() {
-        // Process the input (for now, just log it)
-        console.log(`User input: "${this.inputBuffer}"`);
+        const input = this.inputBuffer.trim();
+        console.log(`User input: "${input}"`);
         
-        // Move to next line
+        // Move to next line and clear input
         this.cursor.y++;
         this.cursor.x = 0;
-        this.inputStartX = 0;
         this.inputBuffer = '';
         
         // Scroll if needed
         if (this.cursor.y >= this.rows) {
             this.scrollUp();
             this.cursor.y = this.rows - 1;
+        }
+        
+        // Process the command
+        if (input) {
+            this.processCommand(input);
         }
         
         // Add prompt for next input
@@ -591,6 +611,176 @@ class ASCIITerminal {
         // Ensure cursor is visible for new input
         this.showCursor = true;
         this.redrawInputLine();
+    }
+
+    processCommand(input) {
+        const parts = input.split(' ');
+        const command = parts[0].toLowerCase();
+        const args = parts.slice(1);
+        
+        if (!world) {
+            this.writeText("World not initialized. Something has gone wrong.\n");
+            return;
+        }
+        
+        switch (command) {
+            case 'look':
+            case 'l':
+                const targetId = args[0] || null;
+                const worldDescription = world.describe(targetId);
+                this.writeText("\n" + worldDescription + "\n");
+                break;
+                
+            case 'examine':
+            case 'x':
+            case 'inspect':
+                if (args.length === 0) {
+                    this.writeText("Examine what?\n");
+                    return;
+                }
+                const obj = world.getObject(args[0]);
+                if (obj) {
+                    const context = obj.getLocalContext();
+                    this.writeText(`\n=== ${obj.name} ===\n`);
+                    this.writeText(`${obj.description}\n\n`);
+                    
+                    if (obj.relationships.length > 0) {
+                        this.writeText("Relationships:\n");
+                        obj.relationships.forEach(rel => {
+                            const target = world.getObject(rel.to);
+                            const progressStr = rel.progress !== null ? ` (${Math.round(rel.progress * 100)}%)` : '';
+                            this.writeText(`  - ${rel.relationship} ${target ? target.name : rel.to}${progressStr}\n`);
+                        });
+                        this.writeText("\n");
+                    }
+                } else {
+                    this.writeText(`Cannot find "${args[0]}".\n`);
+                }
+                break;
+                
+            case 'list':
+            case 'ls':
+                this.writeText("\nObjects in world:\n");
+                for (const [id, obj] of world.objects) {
+                    const parentName = obj.parent ? obj.parent.name : 'ROOT';
+                    this.writeText(`  ${id}: "${obj.name}" (in ${parentName})\n`);
+                }
+                this.writeText("\n");
+                break;
+                
+            case 'create':
+                if (args.length < 3) {
+                    this.writeText("Usage: create <id> <name> <description> [parentId]\n");
+                    return;
+                }
+                const [id, name, ...descParts] = args;
+                const objDescription = descParts.join(' ');
+                const parentId = null; // For now, create at root level
+                const created = world.createObject(id, name, objDescription, parentId);
+                if (created) {
+                    this.writeText(`Created: ${name}\n`);
+                } else {
+                    this.writeText(`Failed to create object "${id}"\n`);
+                }
+                break;
+                
+            case 'move':
+                if (args.length < 2) {
+                    this.writeText("Usage: move <object> <destination>\n");
+                    return;
+                }
+                const success = world.moveObject(args[0], args[1]);
+                if (success) {
+                    this.writeText(`Moved ${args[0]} to ${args[1]}\n`);
+                } else {
+                    this.writeText(`Failed to move ${args[0]}\n`);
+                }
+                break;
+                
+            case 'relate':
+                if (args.length < 3) {
+                    this.writeText("Usage: relate <object1> <relationship> <object2> [progress]\n");
+                    return;
+                }
+                const fromObj = world.getObject(args[0]);
+                if (fromObj) {
+                    const progress = args[3] ? parseFloat(args[3]) : null;
+                    fromObj.addRelationship(args[1], args[2], progress);
+                    this.writeText(`Added relationship: ${args[0]} ${args[1]} ${args[2]}\n`);
+                } else {
+                    this.writeText(`Object "${args[0]}" not found\n`);
+                }
+                break;
+                
+            case 'who':
+            case 'me':
+                if (world.playerObjectId) {
+                    const player = world.getObject(world.playerObjectId);
+                    if (player) {
+                        this.writeText(`\nYou are ${player.name}.\n`);
+                        this.writeText(`${player.description}\n\n`);
+                    }
+                } else {
+                    this.writeText("No player character set.\n");
+                }
+                break;
+                
+            case 'save':
+                const data = world.export();
+                localStorage.setItem('vivarium_world', JSON.stringify(data));
+                this.writeText("World saved.\n");
+                break;
+                
+            case 'load':
+                const savedData = localStorage.getItem('vivarium_world');
+                if (savedData) {
+                    world.import(JSON.parse(savedData));
+                    this.writeText("World loaded.\n");
+                } else {
+                    this.writeText("No saved world found.\n");
+                }
+                break;
+                
+            case 'status':
+                this.writeText(`\n=== World Status ===\n`);
+                this.writeText(`Simulation: ${world.isSimulating ? 'RUNNING' : 'STOPPED'}\n`);
+                this.writeText(`Time: ${world.simulationTime}\n`);
+                this.writeText(`Objects: ${world.objects.size}\n`);
+                this.writeText(`Root: ${world.rootObject ? world.rootObject.name : 'None'}\n\n`);
+                break;
+                
+            case 'help':
+            case '?':
+                this.writeText(`\n=== Available Commands ===\n`);
+                this.writeText(`look [object]         - Describe world or specific object\n`);
+                this.writeText(`examine <object>      - Detailed inspection of object\n`);
+                this.writeText(`list                  - List all objects\n`);
+                this.writeText(`who / me              - Show your character\n`);
+                this.writeText(`create <id> <name> <description> - Create new object\n`);
+                this.writeText(`move <object> <dest>  - Move object to new location\n`);
+                this.writeText(`relate <obj1> <rel> <obj2> [progress] - Add relationship\n`);
+                this.writeText(`save / load           - Save/load world state\n`);
+                this.writeText(`status                - Show world status\n`);
+                this.writeText(`help                  - Show this help\n\n`);
+                this.writeText(`=== Actions ===\n`);
+                this.writeText(`Anything else you type will be interpreted as an action.\n`);
+                this.writeText(`Examples: "turn the steering wheel", "pet the cat", "look around"\n\n`);
+                break;
+                
+            default:
+                // Treat everything else as a player action
+                this.writeText("Processing...\n");
+                world.processPlayerAction(input).then(result => {
+                    // Clear the "Processing..." line and show result
+                    this.clearLastLine();
+                    this.writeText(result);
+                }).catch(error => {
+                    console.error('Action processing failed:', error);
+                    this.clearLastLine();
+                    this.writeText(`Error: ${error.message}\n`);
+                });
+                break;
+        }
     }
     
     handleBackspace() {
@@ -687,6 +877,52 @@ class ASCIITerminal {
     }
 }
 
+// Global world instance
+let world = null;
+
+// World update callback for terminal display
+window.onWorldUpdate = (worldInstance) => {
+    if (world && world.isSimulating) {
+        // Optional: Show simulation updates in terminal
+        // Uncomment to see live simulation updates:
+        // terminal.writeText(`[Sim ${world.simulationTime}] World updated\n`);
+    }
+};
+
+// Initialize world with starting scenario
+function initializeWorld() {
+    world = new World();
+    
+    // Create the initial world - a simple boat scenario
+    const ocean = world.createObject('ocean', 'The Endless Ocean', 'Dark waters stretch beyond the horizon, dotted with mysterious islands.');
+    
+    const island = world.createObject('island_1', 'Fog-Shrouded Island', 'A small landmass wrapped in perpetual mist. Ancient structures peek through the gray veil.', 'ocean');
+    
+    const dock = world.createObject('dock_1', 'Weathered Dock', 'Rotting wooden planks extend into the black water. Something stirs beneath the surface.', 'island_1');
+    
+    const boat = world.createObject('boat_1', 'Small Fishing Boat', 'A humble vessel with nets and basic supplies. Its paint is faded, its wood warped by salt.', 'dock_1');
+    
+    // Add objects inside the boat
+    const sam = world.createObject('sam', 'Sam', 'A weathered sailor with knowing eyes. Your hands are calloused from years at sea.', 'boat_1');
+    const steeringWheel = world.createObject('wheel', 'Steering Wheel', 'A worn wooden wheel, smooth from countless hands. It responds to the slightest touch.', 'boat_1');
+    const cat = world.createObject('ship_cat', 'Ship Cat', 'A gray tabby with sea-green eyes. It moves with perfect balance despite the rolling waves.', 'boat_1');
+    const catTail = world.createObject('cat_tail', 'Cat Tail', 'A gray striped tail that twitches and flicks with feline emotion.', 'ship_cat');
+    
+    const lighthouse = world.createObject('lighthouse_1', 'Abandoned Lighthouse', 'A tall stone tower, its light long extinguished. Strange symbols are carved into its base.', 'island_1');
+    
+    // Add some relationships
+    boat.addRelationship('docked_at', 'dock_1', 1.0);
+    lighthouse.addRelationship('watches_over', 'dock_1', null);
+    lighthouse.addRelationship('beacon_for', 'boat_1', 0.3); // Lighthouse slowly reactivating
+    
+    // Set player possession
+    world.playerObjectId = 'sam';
+    
+    console.log('World initialized with starting scenario');
+    console.log('You are Sam, aboard the fishing boat.');
+    return world;
+}
+
 // Wait for fonts to load before initializing terminal
 document.addEventListener('DOMContentLoaded', async () => {
     // Wait for November font to load
@@ -707,6 +943,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.log('Terminal initialized with full-width row backgrounds');
     console.log('Row backgrounds: Even=#0a0a0a, Odd=#121212 (use useVisibleRowColors() for better visibility)');
     console.log('Try useVisibleRowColors() for more visible background alternation!');
+    
+    // Initialize the world
+    world = initializeWorld();
     
     // Make terminal globally accessible for debugging
 window.terminal = terminal;
@@ -756,6 +995,169 @@ window.testPadding = () => {
     window.setPadding = (paddingX, paddingY) => terminal.setPadding(paddingX, paddingY);
     window.setTitleVerticalPadding = (lines) => terminal.setTitleVerticalPadding(lines);
     window.writeCenteredText = (text) => terminal.writeCenteredText(text);
+    
+    // === WORLD COMMANDS ===
+    
+    // Display current world state
+    window.look = (objectId = null) => {
+        if (!world) {
+            console.log('World not initialized');
+            return;
+        }
+        
+        const description = world.describe(objectId);
+        terminal.writeText("\n" + description + "\n");
+        terminal.writeText(">> ");
+        terminal.inputStartX = terminal.cursor.x;
+        terminal.inputBuffer = '';
+    };
+    
+    // Create a new object in the world
+    window.createObject = (id, name, description, parentId = null) => {
+        if (!world) {
+            console.log('World not initialized');
+            return;
+        }
+        
+        const obj = world.createObject(id, name, description, parentId);
+        if (obj) {
+            console.log(`Created object: ${name} (${id})`);
+            return obj;
+        } else {
+            console.log(`Failed to create object with id: ${id}`);
+        }
+    };
+    
+    // Move an object to a new location
+    window.moveObject = (objectId, newParentId) => {
+        if (!world) {
+            console.log('World not initialized');
+            return;
+        }
+        
+        const success = world.moveObject(objectId, newParentId);
+        if (success) {
+            console.log(`Moved ${objectId} to ${newParentId}`);
+        } else {
+            console.log(`Failed to move ${objectId}`);
+        }
+    };
+    
+    // Add relationship between objects
+    window.addRelationship = (fromId, relationship, toId, progress = null) => {
+        if (!world) {
+            console.log('World not initialized');
+            return;
+        }
+        
+        const obj = world.getObject(fromId);
+        if (obj) {
+            obj.addRelationship(relationship, toId, progress);
+            console.log(`Added relationship: ${fromId} ${relationship} ${toId}${progress !== null ? ` (${progress})` : ''}`);
+        } else {
+            console.log(`Object ${fromId} not found`);
+        }
+    };
+    
+    // Process a player action (for console use)
+    window.act = async (action) => {
+        if (!world) {
+            console.log('World not initialized');
+            return;
+        }
+        try {
+            console.log('Processing action...');
+            const result = await world.processPlayerAction(action);
+            console.log(result);
+            return result;
+        } catch (error) {
+            console.error('Action failed:', error);
+            return `Error: ${error.message}`;
+        }
+    };
+    
+    // Demo function to test the narrator
+    window.demoActions = async () => {
+        if (!world) {
+            console.log('World not initialized');
+            return;
+        }
+        
+        console.log("=== Testing Action System ===\n");
+        
+        const actions = [
+            "turn the steering wheel",
+            "pet the cat",
+            "hold the wheel steady",
+            "look around quietly"
+        ];
+        
+        for (let i = 0; i < actions.length; i++) {
+            const action = actions[i];
+            console.log(`${i + 1}. Action: "${action}"`);
+            try {
+                const result = await world.processPlayerAction(action);
+                console.log(result);
+            } catch (error) {
+                console.error('Action failed:', error);
+            }
+            console.log("---");
+        }
+    };
+    
+    // Get object details
+    window.inspect = (objectId) => {
+        if (!world) {
+            console.log('World not initialized');
+            return;
+        }
+        
+        const obj = world.getObject(objectId);
+        if (obj) {
+            console.log('Object Details:', obj);
+            console.log('Local Context:', obj.getLocalContext());
+        } else {
+            console.log(`Object ${objectId} not found`);
+        }
+    };
+    
+    // List all objects
+    window.listObjects = () => {
+        if (!world) {
+            console.log('World not initialized');
+            return;
+        }
+        
+        console.log('All objects in world:');
+        for (const [id, obj] of world.objects) {
+            const parentName = obj.parent ? obj.parent.name : 'ROOT';
+            console.log(`  ${id}: "${obj.name}" (in ${parentName})`);
+        }
+    };
+    
+    // Save world state
+    window.saveWorld = () => {
+        if (!world) {
+            console.log('World not initialized');
+            return;
+        }
+        
+        const data = world.export();
+        localStorage.setItem('vivarium_world', JSON.stringify(data));
+        console.log('World saved to localStorage');
+    };
+    
+    // Load world state
+    window.loadWorld = () => {
+        const data = localStorage.getItem('vivarium_world');
+        if (data) {
+            if (!world) world = new World();
+            world.import(JSON.parse(data));
+            console.log('World loaded from localStorage');
+        } else {
+            console.log('No saved world found');
+        }
+    };
     
     // Debug function to test character rendering
     window.testChar = (char = 'A', x = 5, y = 5) => {
@@ -1077,6 +1479,29 @@ window.testPadding = () => {
 ║   Example: terminal.writeText("Hello World!", 0, 5)          ║
 ║ writeCenteredText(text)          - Write horizontally centered║
 ║   Example: writeCenteredText("Centered!")                    ║
+║                                                              ║
+║ === WORLD SIMULATION ===                                     ║
+║ look(objectId)                   - Describe world/object     ║
+║ listObjects()                    - List all world objects    ║
+║ inspect(objectId)                - Get detailed object info  ║
+║ createObject(id, name, desc, parentId) - Create new object  ║
+║ moveObject(objectId, newParentId) - Move object             ║
+║ addRelationship(from, rel, to, progress) - Add relationship ║
+║ act(action)                      - Process player action    ║
+║   Example: act("turn the steering wheel")                   ║
+║ demoActions()                    - Test narrator with examples║
+║ saveWorld() / loadWorld()        - Save/load world state    ║
+║                                                              ║
+║ === LLM INTEGRATION ===                                      ║
+║ setApiKey("your-key")            - Configure Claude API key ║
+║ checkLLM()                       - Check LLM status         ║
+║   Without API key: Uses basic fallback reactions            ║
+║   With API key: Uses Claude 3.5 Haiku for rich responses   ║
+║                                                              ║
+║ === IN-GAME COMMANDS ===                                     ║
+║ Type commands directly in terminal:                          ║
+║ - look, examine <object>, list, who, save, load, help       ║
+║ - Any other text becomes a player action!                   ║
 ║                                                              ║
 ║ terminal.clear()                 - Clear terminal            ║
 ║                                                              ║
