@@ -48,9 +48,9 @@ class ASCIITerminal {
         this.titleVerticalPadding = 3; // Empty lines above and below title
         
         // CRT glow effect settings
-        this.glowEnabled = false;
-        this.glowIntensity = 1.0; // 0.0 to 2.0 scale factor
-        this.glowColor = 'rgb(0, 255, 64, 0.3)'; // Bright green glow
+        this.glowEnabled = true;
+        this.glowIntensity = 1.5; // 0.0 to 3.0 scale factor (higher needed for subtle glow)
+        this.glowColor = 'rgb(0, 255, 64)'; // Bright green glow
         
         this.init();
         this.setupTerminal();
@@ -311,26 +311,16 @@ class ASCIITerminal {
                         charCtx.save();
                         
                         if (this.glowEnabled && this.glowIntensity > 0) {
-                            // CRT-style glow effect: draw multiple passes with increasing blur
+                            // Efficient CRT glow: single large, subtle pass (much faster!)
                             const intensity = this.glowIntensity;
                             
-                            // Draw outer glow (widest, most transparent)
+                            // Single wide glow pass - large radius, very low opacity for performance
                             charCtx.shadowColor = this.glowColor;
-                            charCtx.shadowBlur = 100;
+                            charCtx.shadowBlur = 80 * intensity; // Large, soft glow
                             charCtx.shadowOffsetX = 0;
                             charCtx.shadowOffsetY = 0;
                             charCtx.fillStyle = this.glowColor;
-                            charCtx.globalAlpha = 0.3;
-                            charCtx.fillText(char, this.charWidth / 2, this.charHeight / 2);
-                            
-                            // Draw medium glow
-                            charCtx.shadowBlur = 12 * intensity;
-                            charCtx.globalAlpha = 0.5 * intensity;
-                            charCtx.fillText(char, this.charWidth / 2, this.charHeight / 2);
-                            
-                            // Draw inner glow
-                            charCtx.shadowBlur = 6 * intensity;
-                            charCtx.globalAlpha = 0.8 * intensity;
+                            charCtx.globalAlpha = 0.08 * intensity; // Much more subtle for wide glow
                             charCtx.fillText(char, this.charWidth / 2, this.charHeight / 2);
                         }
                         
@@ -345,12 +335,13 @@ class ASCIITerminal {
                         charCtx.restore();
                     }
                     
-                    // Create new texture for this character
+                    // Create new texture for this character (optimized for glow)
                     texture = new THREE.CanvasTexture(charCanvas);
-                    texture.generateMipmaps = false;
-                    texture.minFilter = THREE.NearestFilter;
-                    texture.magFilter = THREE.NearestFilter;
-                    texture.format = THREE.RGBAFormat; // Ensure alpha channel support
+                    texture.generateMipmaps = false; // Faster without mipmaps
+                    texture.minFilter = THREE.LinearFilter; // Better for glow blur
+                    texture.magFilter = THREE.LinearFilter; // Smoother glow scaling
+                    texture.format = THREE.RGBAFormat; // Alpha channel for glow transparency
+                    texture.flipY = false; // Performance optimization
                     
                     // Cache the texture
                     this.characterTextureCache.set(cacheKey, texture);
@@ -1269,7 +1260,7 @@ window.testPadding = () => {
     
     // CRT Glow Control Functions
     window.setGlowIntensity = (intensity) => {
-        terminal.glowIntensity = Math.max(0, Math.min(2.0, intensity));
+        terminal.glowIntensity = Math.max(0, Math.min(3.0, intensity));
         terminal.characterTextureCache.clear(); // Clear cache to regenerate with new glow
         terminal.refreshDisplay();
         console.log(`Glow intensity set to ${terminal.glowIntensity}`);
@@ -1290,15 +1281,37 @@ window.testPadding = () => {
     };
     
     window.glowPresets = () => {
-        console.log('CRT Glow Presets:');
+        console.log('CRT Glow Presets (Optimized for Performance):');
+        console.log('');
+        console.log('🎨 COLORS:');
         console.log('setGlowColor("rgb(0, 255, 64)")   - Classic green');
         console.log('setGlowColor("rgb(255, 100, 0)")  - Amber/orange');
         console.log('setGlowColor("rgb(0, 150, 255)")  - Blue');
         console.log('setGlowColor("rgb(255, 0, 255)")  - Magenta');
-        console.log('setGlowIntensity(0.5)             - Subtle glow');
-        console.log('setGlowIntensity(1.0)             - Normal glow');
-        console.log('setGlowIntensity(1.5)             - Strong glow');
+        console.log('');
+        console.log('⚡ PERFORMANCE LEVELS:');
+        console.log('setGlowIntensity(0.8)             - Subtle (fastest)');
+        console.log('setGlowIntensity(1.5)             - Normal (default)');
+        console.log('setGlowIntensity(2.5)             - Strong glow');
+        console.log('setGlowIntensity(3.0)             - Maximum intensity');
         console.log('toggleGlow()                      - Enable/disable');
+        console.log('');
+        console.log('💡 TIP: Lower intensity = better performance!');
+    };
+
+    // Performance optimization presets
+    window.performanceMode = () => {
+        terminal.glowIntensity = 0.8; // Minimal but visible
+        terminal.characterTextureCache.clear();
+        terminal.refreshDisplay();
+        console.log('🚀 Performance mode enabled - minimal glow for maximum speed');
+    };
+
+    window.cinematicMode = () => {
+        terminal.glowIntensity = 2.8; // High intensity for dramatic effect
+        terminal.characterTextureCache.clear();
+        terminal.refreshDisplay();
+        console.log('🎬 Cinematic mode enabled - dramatic glow effect');
     };
     
     // Cursor control
