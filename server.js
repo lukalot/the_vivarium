@@ -1,4 +1,4 @@
-// Simple proxy server for Anthropic API calls
+// Simple proxy server for Groq API calls
 // Keeps API key secure on the backend
 
 const express = require('express');
@@ -16,38 +16,41 @@ app.use(cors({
 
 app.use(express.json());
 
-// Proxy endpoint for Anthropic API
-app.post('/api/claude', async (req, res) => {
+// Proxy endpoint for Groq API
+app.post('/api/groq', async (req, res) => {
     try {
         const { prompt, maxTokens = 150 } = req.body;
         
-        if (!process.env.ANTHROPIC_API_KEY) {
+        if (!process.env.GROQ_API_KEY) {
             return res.status(500).json({ 
-                error: 'ANTHROPIC_API_KEY not configured in server environment' 
+                error: 'GROQ_API_KEY not configured in server environment' 
             });
         }
 
-        const response = await fetch('https://api.anthropic.com/v1/messages', {
+        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'x-api-key': process.env.ANTHROPIC_API_KEY,
-                'anthropic-version': '2023-06-01'
+                'Authorization': `Bearer ${process.env.GROQ_API_KEY}`
             },
             body: JSON.stringify({
-                model: 'claude-3-5-haiku-20241022',
-                max_tokens: maxTokens,
+                model: 'moonshotai/kimi-k2-instruct',
                 messages: [{
                     role: 'user',
                     content: prompt
-                }]
+                }],
+                max_tokens: maxTokens,
+                temperature: 0.6,
+                top_p: 1,
+                stream: false,
+                stop: null
             })
         });
 
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
             return res.status(response.status).json({
-                error: `Anthropic API error: ${response.status} ${response.statusText}`,
+                error: `Groq API error: ${response.status} ${response.statusText}`,
                 details: errorData
             });
         }
@@ -68,11 +71,11 @@ app.post('/api/claude', async (req, res) => {
 app.get('/api/health', (req, res) => {
     res.json({ 
         status: 'ok', 
-        anthropicConfigured: !!process.env.ANTHROPIC_API_KEY 
+        groqConfigured: !!process.env.GROQ_API_KEY 
     });
 });
 
 app.listen(PORT, () => {
     console.log(`🚀 Proxy server running on http://localhost:${PORT}`);
-    console.log(`🔑 Anthropic API key: ${process.env.ANTHROPIC_API_KEY ? 'Configured' : 'Missing'}`);
+    console.log(`🔑 Groq API key: ${process.env.GROQ_API_KEY ? 'Configured' : 'Missing'}`);
 });

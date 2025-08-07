@@ -39,12 +39,19 @@ class WorldObject {
     }
 
     // Add or update a relationship
-    addRelationship(relationship, targetId, progress = null) {
+    addRelationship(relationship, targetId, progress = null, progressTime = null) {
         // Remove existing relationship of same type to same target
         this.relationships = this.relationships.filter(
             rel => !(rel.relationship === relationship && rel.to === targetId)
         );
-        this.relationships.push({ relationship, to: targetId, progress });
+        this.relationships.push({ 
+            relationship, 
+            to: targetId, 
+            progress, 
+            progressTime,
+            initialProgress: progress, // Store original progress for calculation
+            initialProgressTime: progressTime // Store original time for calculation
+        });
     }
 
     // Get relationships of a specific type
@@ -181,19 +188,30 @@ class World {
 
         this.simulationTime++;
 
+        // PHASE 0: Progress existing time-based relationships first
+        this.progressTimeBasedRelationships();
+
         // Find the simulation branch (from player up to root)
         const branch = this.getSimulationBranch(playerObject);
         
         // PHASE 1: Complete all simulation first
         const results = await this.simulateBottomUp(branch, action);
 
+        // PHASE 1.5: Analyze actions and update relationships (new relationships won't progress until next turn)
+        await this.analyzeAndUpdateRelationships(action, results);
+
         // Emit simulation event for terminal display
         if (window.terminal && typeof window.onWorldUpdate === 'function') {
             window.onWorldUpdate(this);
         }
 
-        // PHASE 2: Only after simulation is complete, generate narration
-        return await this.narratePlayerExperience(results, action);
+        // PHASE 2: Concurrently generate narration and update descriptions
+        const [narrative] = await Promise.all([
+            this.narratePlayerExperience(results, action),
+            this.updateObjectDescriptions(results)
+        ]);
+        
+        return narrative;
     }
 
     // Get the simulation branch - all objects from player's container up to root
@@ -404,6 +422,46 @@ class World {
             action: results.get(sibling.id) || "remains still"
         })).filter(({ action }) => action !== "remains still");
 
+        // Collect ALL relationships from ALL visible objects for narrative context
+        const allRelevantRelationships = [];
+        
+        // Helper function to add relationships from an object
+        const addObjectRelationships = (obj) => {
+            if (obj.relationships.length > 0) {
+                obj.relationships.forEach(rel => {
+                    const target = this.getObject(rel.to);
+                    allRelevantRelationships.push({
+                        from: obj.name,
+                        relationship: rel.relationship,
+                        to: target ? target.name : rel.to,
+                        progress: rel.progress,
+                        progressTime: rel.progressTime
+                    });
+                });
+            }
+        };
+        
+        // Player's relationships
+        addObjectRelationships(playerObject);
+        
+        // Parent container relationships
+        addObjectRelationships(playerParent);
+        
+        // Sibling relationships (other objects in same container)
+        siblings.forEach(sibling => {
+            addObjectRelationships(sibling);
+        });
+        
+        // Child object relationships (objects contained within visible objects)
+        const allVisibleObjects = [playerObject, playerParent, ...siblings];
+        allVisibleObjects.forEach(obj => {
+            if (obj.containedObjects && obj.containedObjects.length > 0) {
+                obj.containedObjects.forEach(child => {
+                    addObjectRelationships(child);
+                });
+            }
+        });
+
         // Prepare context information for the LLM
         const contextInfo = {
             playerName: playerObject.name,
@@ -433,7 +491,8 @@ class World {
                 playerAction, 
                 parentAction, 
                 siblingActions, 
-                contextInfo
+                contextInfo,
+                allRelevantRelationships
             );
             if (window.terminal && window.terminal.developerMode) {
                 window.terminal.devLog(`Narrative generated successfully`);
@@ -555,6 +614,277 @@ class World {
         // Set root object
         if (data.rootObjectId) {
             this.rootObject = this.objects.get(data.rootObjectId);
+        }
+    }
+
+    // Analyze object actions and update relationships based on what happened
+    async analyzeAndUpdateRelationships(playerAction, simulationResults) {
+        console.log('🔗 Starting relationship analysis...');
+        
+        if (!window.llmManager || !window.llmManager.isAvailable()) {
+            console.log('🔗 Skipping relationship analysis - LLM not available');
+            return;
+        }
+
+        // Prepare object actions for analysis
+        const objectActions = [];
+        for (const [objectId, action] of simulationResults) {
+            const obj = this.getObject(objectId);
+            if (obj && action !== "remains still") {
+                objectActions.push({
+                    objectName: obj.name.toLowerCase(), // Ensure lowercase for consistency
+                    objectId: objectId,
+                    action: action
+                });
+            }
+        }
+
+        console.log(`🔗 Found ${objectActions.length} meaningful actions to analyze`);
+        if (objectActions.length > 0) {
+            objectActions.forEach(oa => {
+                console.log(`🔗   - ${oa.objectName}: "${oa.action}"`);
+            });
+        }
+
+        // Only analyze if there are meaningful actions
+        if (objectActions.length === 0) {
+            console.log('🔗 No meaningful actions - skipping analysis');
+            return;
+        }
+
+        // Developer logging
+        if (window.terminal && window.terminal.developerMode) {
+            window.terminal.devLog(`Analyzing relationships based on ${objectActions.length} object actions`);
+        }
+
+        try {
+            console.log('🔗 Calling LLM for relationship analysis...');
+            
+            // Analyze actions to detect relationship changes
+            const relationshipChanges = await window.llmManager.analyzeRelationshipChanges(
+                playerAction, 
+                objectActions
+            );
+
+            console.log(`🔗 LLM returned ${relationshipChanges.length} relationship changes`);
+
+            // Apply the relationship changes
+            if (relationshipChanges.length > 0) {
+                console.log('🔗 Applying relationship changes:');
+                
+                if (window.terminal && window.terminal.developerMode) {
+                    window.terminal.devLog(`Found ${relationshipChanges.length} relationship changes`);
+                }
+
+                for (const change of relationshipChanges) {
+                    this.applyRelationshipChange(change);
+                }
+            } else {
+                console.log('🔗 No new relationships detected');
+                
+                if (window.terminal && window.terminal.developerMode) {
+                    window.terminal.devLog(`No new relationships detected`);
+                }
+            }
+        } catch (error) {
+            console.error('🔗 Relationship analysis failed:', error.message);
+            console.warn('Relationship analysis failed:', error.message);
+        }
+    }
+
+    // Apply a single relationship change to the world
+    applyRelationshipChange(change) {
+        console.log(`🔗 Looking for source object: "${change.from}"`);
+        const sourceObj = this.getObjectByName(change.from);
+        console.log(`🔗 Found source object:`, sourceObj ? `${sourceObj.name} (${sourceObj.id})` : 'NOT FOUND');
+        
+        console.log(`🔗 Looking for target object: "${change.to}"`);
+        const targetObj = this.getObjectByName(change.to);
+        console.log(`🔗 Found target object:`, targetObj ? `${targetObj.name} (${targetObj.id})` : 'NOT FOUND');
+        
+        if (!sourceObj) {
+            console.warn(`🔗 Relationship source object not found: "${change.from}"`);
+            console.log(`🔗 Available objects:`, Array.from(this.objects.entries()).map(([id, obj]) => `${id} (${obj.name})`));
+            return;
+        }
+        
+        if (!targetObj) {
+            console.warn(`🔗 Relationship target object not found: "${change.to}"`);
+            console.log(`🔗 Available objects:`, Array.from(this.objects.entries()).map(([id, obj]) => `${id} (${obj.name})`));
+            return;
+        }
+
+        // Apply the relationship
+        sourceObj.addRelationship(change.relationship, targetObj.id, change.progress, change.progressTime);
+        
+        // Always log relationship changes (not just in dev mode)
+        const progressPercent = Math.round(change.progress * 100);
+        const timeInfo = change.progressTime ? ` in ${change.progressTime} steps` : '';
+        console.log(`🔗 ✅ Applied: ${change.from} ${change.relationship} ${change.to} (${progressPercent}%${timeInfo})`);
+        
+        if (window.terminal && window.terminal.developerMode) {
+            window.terminal.devLog(`Applied: ${change.from} ${change.relationship} ${change.to} (${progressPercent}%${timeInfo})`);
+        }
+    }
+
+    // Helper method to find object by name or ID (case-insensitive)
+    getObjectByName(name) {
+        const lowerName = name.toLowerCase();
+        
+        // First try to find by object ID (exact match or case-insensitive)
+        if (this.objects.has(name)) {
+            return this.objects.get(name);
+        }
+        if (this.objects.has(lowerName)) {
+            return this.objects.get(lowerName);
+        }
+        
+        // Then try to find by display name (case-insensitive)
+        for (const [id, obj] of this.objects) {
+            if (obj.name.toLowerCase() === lowerName) {
+                return obj;
+            }
+        }
+        
+        // Also try to find by ID case-insensitive
+        for (const [id, obj] of this.objects) {
+            if (id.toLowerCase() === lowerName) {
+                return obj;
+            }
+        }
+        
+        return null;
+    }
+
+    // Progress all time-based relationships by one step
+    progressTimeBasedRelationships() {
+        let relationshipsChanged = 0;
+        let relationshipsCompleted = 0;
+        
+        for (const [objectId, obj] of this.objects) {
+            for (let i = 0; i < obj.relationships.length; i++) {
+                const rel = obj.relationships[i];
+                
+                // Only progress relationships that have progressTime and aren't complete
+                if (rel.progressTime !== null && rel.progressTime > 0 && rel.progress < 1.0) {
+                    const wasIncomplete = rel.progress < 1.0;
+                    
+                    // Decrease time remaining
+                    rel.progressTime--;
+                    
+                    // Calculate new progress based on original values
+                    if (rel.initialProgress !== null && rel.initialProgressTime !== null && rel.initialProgressTime > 0) {
+                        const timeElapsed = rel.initialProgressTime - rel.progressTime;
+                        const progressGain = (1.0 - rel.initialProgress) * (timeElapsed / rel.initialProgressTime);
+                        rel.progress = Math.min(1.0, rel.initialProgress + progressGain);
+                    }
+                    
+                    relationshipsChanged++;
+                    
+                    // Check if this relationship just became complete
+                    if (wasIncomplete && rel.progress >= 1.0) {
+                        relationshipsCompleted++;
+                    }
+                    
+                    // Log the progression
+                    const targetObj = this.getObject(rel.to);
+                    const progressPercent = Math.round(rel.progress * 100);
+                    const timeRemaining = rel.progressTime > 0 ? ` (${rel.progressTime} steps remaining)` : ' (complete)';
+                    const completedIndicator = wasIncomplete && rel.progress >= 1.0 ? ' ✅' : '';
+                    
+                    if (window.terminal && window.terminal.developerMode) {
+                        window.terminal.devLog(`Progressed: ${obj.name} ${rel.relationship} ${targetObj ? targetObj.name : rel.to} → ${progressPercent}%${timeRemaining}${completedIndicator}`);
+                    }
+                    
+                    console.log(`🔗 ⏱️ Progressed: ${obj.name} ${rel.relationship} ${targetObj ? targetObj.name : rel.to} → ${progressPercent}%${timeRemaining}${completedIndicator}`);
+                }
+            }
+        }
+        
+        if (relationshipsChanged > 0) {
+            console.log(`🔗 ⏱️ Relationship Summary: ${relationshipsChanged} progressed, ${relationshipsCompleted} completed`);
+            
+            if (window.terminal && window.terminal.developerMode) {
+                window.terminal.devLog(`Relationship Summary: ${relationshipsChanged} progressed, ${relationshipsCompleted} completed`);
+            }
+        }
+    }
+
+    // Update descriptions of all objects that had actions (concurrent with narrative generation)
+    async updateObjectDescriptions(simulationResults) {
+        if (!window.llmManager || !window.llmManager.isAvailable()) {
+            console.log('📝 Skipping description updates - LLM not available');
+            return;
+        }
+
+        const updatePromises = [];
+        let updatesScheduled = 0;
+
+        for (const [objectId, action] of simulationResults) {
+            const obj = this.getObject(objectId);
+            
+            // Only update objects that had meaningful actions
+            if (obj && action !== "remains still") {
+                const objectContext = {
+                    name: obj.name,
+                    description: obj.description,
+                    parent: obj.parent
+                };
+
+                // Get sibling actions for context (but not player action)
+                const siblingActions = [];
+                if (obj.parent) {
+                    obj.parent.containedObjects.forEach(sibling => {
+                        if (sibling.id !== objectId && simulationResults.has(sibling.id)) {
+                            const siblingAction = simulationResults.get(sibling.id);
+                            if (siblingAction !== "remains still") {
+                                siblingActions.push({
+                                    objectName: sibling.name,
+                                    action: siblingAction
+                                });
+                            }
+                        }
+                    });
+                }
+
+                // Schedule description update
+                const updatePromise = window.llmManager.updateObjectDescription(
+                    objectContext, 
+                    action, 
+                    siblingActions
+                ).then(newDescription => {
+                    if (newDescription !== obj.description) {
+                        const oldDesc = obj.description;
+                        obj.description = newDescription;
+                        
+                        console.log(`📝 ✏️ Updated ${obj.name} description`);
+                        
+                        if (window.terminal && window.terminal.developerMode) {
+                            window.terminal.devLog(`Updated ${obj.name} description`);
+                            window.terminal.devLog(`Old: "${oldDesc}"`);
+                            window.terminal.devLog(`New: "${newDescription}"`);
+                        }
+                    }
+                }).catch(error => {
+                    console.warn(`📝 Failed to update ${obj.name} description:`, error.message);
+                });
+
+                updatePromises.push(updatePromise);
+                updatesScheduled++;
+            }
+        }
+
+        if (updatesScheduled > 0) {
+            console.log(`📝 Updating descriptions for ${updatesScheduled} objects...`);
+            
+            if (window.terminal && window.terminal.developerMode) {
+                window.terminal.devLog(`Updating descriptions for ${updatesScheduled} objects...`);
+            }
+
+            // Wait for all description updates to complete
+            await Promise.all(updatePromises);
+            
+            console.log(`📝 Description updates completed`);
         }
     }
 }

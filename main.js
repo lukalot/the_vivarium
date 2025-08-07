@@ -713,7 +713,8 @@ class ASCIITerminal {
                         obj.relationships.forEach(rel => {
                             const target = world.getObject(rel.to);
                             const progressStr = rel.progress !== null ? ` (${Math.round(rel.progress * 100)}%)` : '';
-                            this.writeText(`  - ${rel.relationship} ${target ? target.name : rel.to}${progressStr}\n`);
+                            const timeStr = rel.progressTime !== null && rel.progressTime > 0 ? ` [${rel.progressTime} steps]` : '';
+                            this.writeText(`  - ${rel.relationship} ${target ? target.name : rel.to}${progressStr}${timeStr}\n`);
                         });
                         this.writeText("\n");
                     }
@@ -988,7 +989,7 @@ function initializeWorld() {
     const lighthouse = world.createObject('lighthouse_1', 'Abandoned Lighthouse', 'A tall stone tower, its light long extinguished. Strange symbols are carved into its base.', 'island_1');
     
     // Add some relationships
-    boat.addRelationship('docked_at', 'dock_1', 1.0);
+    boat.addRelationship('docked_at', 'dock_1', 0);
     lighthouse.addRelationship('watches_over', 'dock_1', null);
     lighthouse.addRelationship('beacon_for', 'boat_1', 0.3); // Lighthouse slowly reactivating
     
@@ -1150,35 +1151,6 @@ window.testPadding = () => {
         } catch (error) {
             console.error('Action failed:', error);
             return `Error: ${error.message}`;
-        }
-    };
-    
-    // Demo function to test the narrator
-    window.demoActions = async () => {
-        if (!world) {
-            console.log('World not initialized');
-            return;
-        }
-        
-        console.log("=== Testing Action System ===\n");
-        
-        const actions = [
-            "turn the steering wheel",
-            "pet the cat",
-            "hold the wheel steady",
-            "look around quietly"
-        ];
-        
-        for (let i = 0; i < actions.length; i++) {
-            const action = actions[i];
-            console.log(`${i + 1}. Action: "${action}"`);
-            try {
-                const result = await world.processPlayerAction(action);
-                console.log(result);
-            } catch (error) {
-                console.error('Action failed:', error);
-            }
-            console.log("---");
         }
     };
     
@@ -1568,10 +1540,10 @@ window.testPadding = () => {
 ║                                                              ║
 ║ === LLM INTEGRATION ===                                      ║
 ║ SETUP: cp config.example.js config.js, add your API key     ║
-║ setApiKey("your-key")            - Configure Claude API key  ║
+║ setApiKey("your-key")            - Configure Groq API key    ║
 ║ checkLLM()                       - Check LLM status          ║
 ║   ⚠️  REQUIRED: Narrator now requires LLM - no fallbacks    ║
-║   With API key: Uses Claude 3.5 Haiku for all responses     ║
+║   With API key: Uses Groq/Kimi K2 for all responses         ║
 ║                                                              ║
 ║ === IN-GAME COMMANDS ===                                     ║
 ║ Type commands with "/" prefix in terminal:                   ║

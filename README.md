@@ -112,9 +112,6 @@ checkLLM()
 // View world state  
 inspect('boat_1')
 listObjects()
-
-// Test narrator
-testNarrator()
 ```
 
 ## Troubleshooting 🩺
